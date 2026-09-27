@@ -6,12 +6,12 @@
 
 ## 下载
 
-到 [Releases](../../releases) 页下载对应平台安装包：
+到 [Releases](../../releases) 页下载对应平台可执行文件：
 
-| 平台 | 文件 | 首次打开 |
+| 平台 | 文件 | 说明 |
 |---|---|---|
-| macOS (Apple Silicon / Intel) | `LeapDrop_x.x.x_universal.dmg` | 未签名：右键 → 打开（或 系统设置 → 隐私与安全性 → 仍要打开） |
-| Windows | `LeapDrop_x.x.x_x64-setup.exe` | 未签名：SmartScreen 提示时点「仍要运行」 |
+| macOS (Apple Silicon / Intel 通用) | `LeapDrop_0.1.0_universal.dmg` | 未签名：首次打开请右键 → 打开；并允许「本地网络」权限 |
+| Windows 10/11 x64 | `leapdrop-windows-x64.zip` | 解压运行 `leapdrop.exe`；需系统自带 WebView2 运行时（Win11 已内置）；SmartScreen 提示时点「仍要运行」，防火墙勾选「专用网络」 |
 
 首次运行需要允许：macOS 的「本地网络」权限与防火墙；Windows 防火墙（勾选专用网络）。
 
