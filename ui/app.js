@@ -334,3 +334,14 @@ $('#saveName').addEventListener('click', async () => {
     toast(`改名失败：${e}`, 'err');
   }
 });
+
+/* ── 首启权限引导（点「知道了」后不再显示） ── */
+(function () {
+  const banner = document.getElementById('permBanner');
+  if (!banner) return;
+  if (!localStorage.getItem('leapdrop-perm-hint-dismissed')) banner.hidden = false;
+  document.getElementById('permClose').addEventListener('click', () => {
+    banner.hidden = true;
+    localStorage.setItem('leapdrop-perm-hint-dismissed', '1');
+  });
+})();

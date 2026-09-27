@@ -34,6 +34,16 @@
         <span class="netpill" id="netpill"><i></i>扫描中…</span>
       </div>
 
+      <div class="perm-banner" id="permBanner" hidden>
+        <div class="pb-body">
+          <b>首次使用请允许两项权限</b>
+          <p>① 系统弹「本地网络」授权 → <b>允许</b>（发现设备必需）<br>
+             ② 防火墙弹窗「是否允许 LeapDrop 接入网络」 → 点 <b>允许</b><br>
+             <span class="pb-fix">如果之前点过拒绝：系统设置 → 隐私与安全性 → 本地网络 → 打开 LeapDrop 开关；系统设置 → 网络 → 防火墙 → 选项 → 将 LeapDrop 改为「允许传入连接」，然后完全退出并重新打开本应用。</span></p>
+        </div>
+        <button class="pb-close" id="permClose">知道了</button>
+      </div>
+
       <div class="radarwrap" id="radar">
         <span class="ring r1"></span><span class="ring r2"></span><span class="ring r3"></span>
         <div class="sweep" aria-hidden="true"></div>
@@ -100,7 +110,7 @@
       <div class="setsec">
         <h3>关于</h3>
         <div class="srow">
-          <div class="t"><b>跃传 LeapDrop</b><small>v0.1.0（P0：局域网互传）· 跨网络配对将在 P1 提供</small></div>
+          <div class="t"><b>跃传 LeapDrop</b><small>v0.1.1（P0：局域网互传）· 跨网络配对将在 P1 提供</small></div>
         </div>
       </div>
 

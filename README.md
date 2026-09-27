@@ -10,7 +10,7 @@
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| macOS (Apple Silicon / Intel 通用) | `LeapDrop_0.1.0_universal.dmg` | 未签名，首次打开见下方步骤；并允许「本地网络」权限 |
+| macOS (Apple Silicon / Intel 通用) | `LeapDrop_0.1.1_universal.dmg` | 未签名，首次打开见下方步骤；并允许「本地网络」权限 |
 | Windows 10/11 x64 | `leapdrop-windows-x64.zip` | 解压运行 `leapdrop.exe`；需系统自带 WebView2 运行时（Win11 已内置）；SmartScreen 提示时点「仍要运行」，防火墙勾选「专用网络」 |
 
 ### macOS 首次打开（未签名应用的放行步骤）
@@ -59,7 +59,7 @@ codesign --verify --deep "$APP"             # 必须输出通过
 # 从签名后的 app 重新生成 dmg
 rm -rf /tmp/dmgstage && mkdir /tmp/dmgstage
 cp -R "$APP" /tmp/dmgstage/ && ln -s /Applications /tmp/dmgstage/Applications
-hdiutil create -volname LeapDrop -srcfolder /tmp/dmgstage -ov -format UDZO LeapDrop_0.1.0_universal.dmg
+hdiutil create -volname LeapDrop -srcfolder /tmp/dmgstage -ov -format UDZO LeapDrop_0.1.1_universal.dmg
 ```
 
 签名后收件人首次打开：双击被拦 → 系统设置 → 隐私与安全性 → 「仍要打开」（或 `xattr -dr com.apple.quarantine /Applications/LeapDrop.app`）。若购买 Apple Developer 账号，可将 `-` 换成 Developer ID 证书并做公证，收件人双击直开。

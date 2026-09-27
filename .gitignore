@@ -13,3 +13,6 @@ src-tauri/gen/
 # 系统杂项
 .DS_Store
 src-tauri/icons/icon.iconset/
+
+# CI workflow：当前 token 缺 workflow scope 暂不入库（内容见 docs/release-workflow.example.yml）
+.github/workflows/

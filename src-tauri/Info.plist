@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- macOS 15+ 必须声明，否则首次运行不弹「本地网络」授权且访问被静默拒绝 -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>跃传需要访问本地网络，用于发现同一 Wi-Fi 下的其他设备并直连传输文件。文件不会离开你的局域网。</string>
+	<!-- 声明使用的 Bonjour 服务类型，配合上面的描述触发系统授权 -->
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_leapdrop._tcp</string>
+	</array>
+</dict>
+</plist>
