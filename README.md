@@ -47,6 +47,31 @@ cargo test       # 集成测试：TLS 回环传输 + 拒绝流程
 cargo build --release   # 发布构建（产物在 target/release/leapdrop）
 ```
 
+### 发布 macOS dmg（关键：打包后必须 ad-hoc 签名）
+
+`cargo tauri build` 产出的 .app **没有完整签名**，直接分发在新版 macOS 上会报「已损坏」且无法放行。必须补一步签名再重新做 dmg：
+
+```bash
+cargo tauri build --target universal-apple-darwin
+APP=target/universal-apple-darwin/release/bundle/macos/LeapDrop.app
+codesign --force --deep --sign - "$APP"     # ad-hoc 完整签名
+codesign --verify --deep "$APP"             # 必须输出通过
+# 从签名后的 app 重新生成 dmg
+rm -rf /tmp/dmgstage && mkdir /tmp/dmgstage
+cp -R "$APP" /tmp/dmgstage/ && ln -s /Applications /tmp/dmgstage/Applications
+hdiutil create -volname LeapDrop -srcfolder /tmp/dmgstage -ov -format UDZO LeapDrop_0.1.0_universal.dmg
+```
+
+签名后收件人首次打开：双击被拦 → 系统设置 → 隐私与安全性 → 「仍要打开」（或 `xattr -dr com.apple.quarantine /Applications/LeapDrop.app`）。若购买 Apple Developer 账号，可将 `-` 换成 Developer ID 证书并做公证，收件人双击直开。
+
+### 发布 Windows exe（macOS 交叉编译）
+
+```bash
+# 前置：安装 LLVM（需要 clang-cl/llvm-lib/llvm-rc）并加入 PATH；rustup target add x86_64-pc-windows-msvc
+cargo xwin build --release --target x86_64-pc-windows-msvc
+# target/x86_64-pc-windows-msvc/release/leapdrop.exe 打 zip 分发
+```
+
 > 本机若遇到 `tapi error: malformed file ... MacOSX27.0.sdk`（CLT 新 SDK 与链接器不兼容），仓库已在 `src-tauri/.cargo/config.toml` 固定 `SDKROOT=MacOSX26.5.sdk`。
 
 首次运行 macOS 会弹两个系统授权，都需要允许：

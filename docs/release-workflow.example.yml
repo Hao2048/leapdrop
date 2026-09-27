@@ -9,24 +9,49 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
-            tauri-args: --target universal-apple-darwin
-          - os: windows-latest
-            rust-targets: x86_64-pc-windows-msvc
-            tauri-args: ''
-    runs-on: ${{ matrix.os }}
+  build-macos:
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.rust-targets }}
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --locked
+
+      - name: Build universal app
+        run: cargo tauri build --target universal-apple-darwin
+
+      # 关键：tauri 产物没有完整签名，直接分发会被 Gatekeeper 判为「已损坏」且无法放行。
+      # 无 Apple Developer 账号时用 ad-hoc 签名；有账号请改用 Developer ID + notarytool 公证。
+      - name: Ad-hoc sign and rebuild dmg
+        run: |
+          APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/LeapDrop.app"
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep "$APP"
+          STAGE=$(mktemp -d)
+          cp -R "$APP" "$STAGE/" && ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname LeapDrop -srcfolder "$STAGE" -ov -format UDZO LeapDrop_universal.dmg
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: LeapDrop_universal.dmg
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
 
       - uses: swatinem/rust-cache@v2
         with:
@@ -42,12 +67,5 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: '跃传 LeapDrop ${{ github.ref_name }}'
-          releaseBody: |
-            局域网文件互传 P0：mDNS 自动发现 + TLS 直传 + 接收确认 + 断点续传。
-
-            **首次运行权限（都需要允许，否则扫描不到设备）：**
-            - macOS：本地网络权限 + 防火墙；安装包未签名，首次打开请右键 → 打开
-            - Windows：防火墙弹窗勾选「专用网络」；SmartScreen 提示点「仍要运行」
           releaseDraft: false
           prerelease: false
-          args: ${{ matrix.tauri-args }}
