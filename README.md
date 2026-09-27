@@ -10,10 +10,23 @@
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| macOS (Apple Silicon / Intel 通用) | `LeapDrop_0.1.0_universal.dmg` | 未签名：首次打开请右键 → 打开；并允许「本地网络」权限 |
+| macOS (Apple Silicon / Intel 通用) | `LeapDrop_0.1.0_universal.dmg` | 未签名，首次打开见下方步骤；并允许「本地网络」权限 |
 | Windows 10/11 x64 | `leapdrop-windows-x64.zip` | 解压运行 `leapdrop.exe`；需系统自带 WebView2 运行时（Win11 已内置）；SmartScreen 提示时点「仍要运行」，防火墙勾选「专用网络」 |
 
-首次运行需要允许：macOS 的「本地网络」权限与防火墙；Windows 防火墙（勾选专用网络）。
+### macOS 首次打开（未签名应用的放行步骤）
+
+双击被系统拦截（「无法验证开发者」/「无法检查是否包含恶意软件」）后，**二选一**：
+
+- **系统设置法**：系统设置 → 隐私与安全性 → 「安全性」区块出现「已阻止使用 LeapDrop」→ 点 **仍要打开** → 输密码 → 再双击即可，之后不会再弹
+- **终端法**（把 app 拖进「应用程序」后执行一行）：
+
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/LeapDrop.app
+  ```
+
+> 注：macOS 13 及更早版本可直接 右键 → 打开；macOS 15+ 不再支持右键绕过，请用上面两种方法。
+
+首次运行还需要允许：macOS 的「本地网络」权限与防火墙；Windows 防火墙（勾选专用网络）。
 
 ## 功能（P0）
 
@@ -80,4 +93,4 @@ POST /api/finalize/{token}   → 对端流式 sha256 校验并落盘
 - 只发文件不发文件夹（拖入文件夹会跳过）
 - 传输不支持中途暂停/取消 UI（断线自动可续传）
 - 单网卡单地址选择，多网卡环境可能选到不通的地址（P1 改为多候选连接）
-- 图标为占位品牌图，未做签名/公证（macOS 首次打开需右键→打开）
+- 图标为占位品牌图，未做签名/公证（macOS 首次打开按 README 的「仍要打开 / xattr」步骤放行）
