@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- iOS 14+ 本地网络权限：发现局域网设备必需 -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>跃传需要访问本地网络，用于发现同一 Wi-Fi 下的其他设备并直连传输文件。</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_leapdrop._tcp</string>
+	</array>
+	<!-- iOS 13+ 本地网络触发前置：精确定位权限（探测 Wi-Fi 网络信息需要） -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>跃传使用位置权限仅用于获取当前 Wi-Fi 网络信息以发现附近设备，不做任何定位。</string>
+</dict>
+</plist>
