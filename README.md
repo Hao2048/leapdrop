@@ -2,7 +2,11 @@
 
 [![release](https://github.com/peng411528/leapdrop/actions/workflows/release.yml/badge.svg)](../../actions)
 
-跨平台局域网文件互传（macOS / Windows）。**mDNS 自动发现 + TLS 直传 + 接收确认 + 断点续传**，无需服务器、文件不出局域网。
+跨平台局域网文件互传（macOS / Windows / Android）。**设备配对 + mDNS 自动发现 + TLS 直传 + 接收确认 + 断点续传**，无需服务器、文件不出局域网。
+
+## 设备配对（v0.2.0 新增）
+
+每台设备首次启动生成永不变更的 **设备 ID**（形如 `3F7A-92C1`，可在设置页查看）。两台设备**首次互传前需配对一次**：发起方点发送后，对方屏幕弹出配对确认（显示双方设备 ID），双方确认后互相保存，之后免确认直传（每次传文件仍有接收确认）。解除配对：设置 → 已配对设备 → 解除配对。所有传输请求带 Ed25519 设备签名，未配对设备的请求一律拒绝。
 
 ## 下载
 
@@ -10,7 +14,8 @@
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| macOS (Apple Silicon / Intel 通用) | `LeapDrop_0.1.1_universal.dmg` | 未签名，首次打开见下方步骤；并允许「本地网络」权限 |
+| macOS (Apple Silicon / Intel 通用) | `LeapDrop_x.x.x_universal.dmg` | 未签名，首次打开见下方步骤；并允许「本地网络」权限 |
+| Android 8+ (arm64) | `leapdrop-android-arm64.apk` | 直接安装；首次运行允许「位置/附近设备」与网络权限 |
 | Windows 10/11 x64 | `leapdrop-windows-x64.zip` | 解压运行 `leapdrop.exe`；需系统自带 WebView2 运行时（Win11 已内置）；SmartScreen 提示时点「仍要运行」，防火墙勾选「专用网络」 |
 
 ### macOS 首次打开（未签名应用的放行步骤）
@@ -38,7 +43,7 @@
 
 ## 构建与运行
 
-前置：Rust（rustup stable）、macOS 需要 Xcode Command Line Tools；Windows 需要 VS Build Tools。
+前置：Rust（rustup stable）、macOS 需要 Xcode Command Line Tools；Windows 需要 VS Build Tools；Android 需要 JDK17 + Android SDK/NDK（`cargo tauri android init` 一次，`cargo tauri android build --apk --target aarch64` 出包）。
 
 ```bash
 cd src-tauri

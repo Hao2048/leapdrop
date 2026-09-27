@@ -19,6 +19,8 @@ fn make_state(dir: &std::path::Path, port: u16) -> Arc<leapdrop::AppState> {
         data_dir: dir.to_path_buf(),
         peers: Arc::new(Mutex::new(HashMap::new())),
         sessions: Mutex::new(HashMap::new()),
+        pair_sessions: Mutex::new(HashMap::new()),
+        trusted: Arc::new(Mutex::new(leapdrop::load_trusted(dir))),
         emitter,
         discovery: std::sync::OnceLock::new(),
     })
@@ -28,6 +30,7 @@ fn peer_of(state: &Arc<leapdrop::AppState>, port: u16) -> Peer {
     let id = state.identity.read().unwrap();
     Peer {
         id: "test-instance".into(),
+        device_id: id.device_id.clone(),
         name: id.name.clone(),
         os: id.os.clone(),
         fp: id.fingerprint.clone(),
@@ -80,6 +83,16 @@ async fn full_transfer_roundtrip() {
         for t in pending {
             leapdrop::server::respond(&auto_state, &t, true);
         }
+        let pair_pending: Vec<String> = {
+            let s = auto_state.pair_sessions.lock().unwrap();
+            s.iter()
+                .filter(|(_, x)| x.decided.is_none())
+                .map(|(k, _)| k.clone())
+                .collect()
+        };
+        for t in pair_pending {
+            leapdrop::server::respond_pair(&auto_state, &t, true);
+        }
         std::thread::sleep(std::time::Duration::from_millis(100));
         // 退出条件：下载目录出现目标文件
         if auto_state.download_dir.join("测试文件.bin").exists() {
@@ -125,13 +138,23 @@ async fn reject_declines_transfer() {
         for t in pending {
             leapdrop::server::respond(&auto_state, &t, false);
         }
+        let pair_pending: Vec<String> = {
+            let s = auto_state.pair_sessions.lock().unwrap();
+            s.iter()
+                .filter(|(_, x)| x.decided.is_none())
+                .map(|(k, _)| k.clone())
+                .collect()
+        };
+        for t in pair_pending {
+            leapdrop::server::respond_pair(&auto_state, &t, false);
+        }
         std::thread::sleep(std::time::Duration::from_millis(50));
     });
 
     let err = leapdrop::sender::send(&send_state, &peer, vec![src.display().to_string()])
         .await
         .unwrap_err();
-    assert!(err.contains("拒绝"), "错误信息应表明被拒绝：{err}");
+    assert!(err.contains("配对"), "错误信息应表明配对被拒：{err}");
 }
 
 fn tempdir() -> std::path::PathBuf {

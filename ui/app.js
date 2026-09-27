@@ -5,6 +5,7 @@ const { listen } = window.__TAURI__.event;
 const $ = (s) => document.querySelector(s);
 const state = {
   peers: [],
+  trusted: [],
   target: null,      // 选中的目标设备 id
   me: null,
   transfers: [],     // {id, dir, peer, name, pct, bytesDone, totalBytes, speed, status}
@@ -79,7 +80,7 @@ function renderPeers() {
     el.className = 'dev' + (state.target === p.id ? ' selected' : '');
     el.style.left = `${x}%`;
     el.style.top = `${y}%`;
-    el.innerHTML = `<span class="tick">✓ 已选中</span><b title="${p.name}">${p.name}</b><small>${p.os || '未知系统'}${p.addr ? ' · ' + p.addr : ''}</small>`;
+    el.innerHTML = `<span class="tick">✓ 已选中</span><span class="pairflag ${p.paired ? '' : 'no'}">${p.paired ? '已配对' : '未配对'}</span><b title="${p.name}">${p.name}</b><small class="num">${p.device_id || '????-????'} · ${p.os || ''}</small>`;
     el.addEventListener('click', () => {
       state.target = state.target === p.id ? null : p.id;
       renderPeers();
@@ -147,6 +148,7 @@ function renderTransfers() {
         t.status === 'done' ? '<span class="badge ok">完成</span>' :
         t.status === 'err' ? '<span class="badge err">失败</span>' :
         t.status === 'rejected' ? '<span class="badge err">已拒绝</span>' :
+        t.status === 'pairing' ? '<span class="badge wait">等待对方确认配对</span>' :
         t.status === 'wait' ? '<span class="badge wait">等待对方确认</span>' :
         '<span class="badge run">传输中</span>';
       return `<div class="trow ${t.status === 'done' ? 'done' : ''} ${t.status === 'err' || t.status === 'rejected' ? 'err' : ''}">
@@ -225,6 +227,63 @@ listen('peers', (e) => {
 });
 listen('incoming', (e) => showIncoming(e.payload));
 listen('incoming-closed', () => closeIncoming());
+
+/* ── 配对 ── */
+let pairToken = null;
+listen('pair-incoming', (e) => {
+  pairToken = e.payload.token;
+  $('#pairName').textContent = e.payload.name;
+  $('#pairId').textContent = e.payload.deviceId;
+  $('#pairVeil').hidden = false;
+});
+listen('pair-closed', () => { $('#pairVeil').hidden = true; pairToken = null; });
+$('#pairAccept').addEventListener('click', async () => {
+  if (!pairToken) return;
+  await invoke('respond_pair', { token: pairToken, accept: true });
+  $('#pairVeil').hidden = true;
+  pairToken = null;
+});
+$('#pairReject').addEventListener('click', async () => {
+  if (!pairToken) return;
+  await invoke('respond_pair', { token: pairToken, accept: false });
+  $('#pairVeil').hidden = true;
+  pairToken = null;
+});
+listen('paired', (e) => toast(`已与「${e.payload.name}」完成配对`, 'ok'));
+listen('tx-pairing', (e) => {
+  upsertTransfer({
+    id: txByPeer[e.payload.peer] || ('tx-' + ++txSeq),
+    dir: 'tx', peer: e.payload.peer,
+    name: `首次传输需先配对（${e.payload.peerName} ${e.payload.peerId}）`,
+    bytesDone: 0, totalBytes: null, speed: 0, status: 'pairing',
+  });
+  txByPeer[e.payload.peer] = state.transfers[0]?.id;
+  gotoView('transfers');
+});
+listen('trusted-changed', (e) => {
+  state.trusted = e.payload || [];
+  renderTrusted();
+});
+
+function renderTrusted() {
+  const box = $('#trustedList');
+  if (!state.trusted || !state.trusted.length) {
+    box.innerHTML = '<div class="srow"><div class="t"><small>还没有配对过的设备。首次向一台设备发送文件时，双方确认一次即完成配对。</small></div></div>';
+    return;
+  }
+  box.innerHTML = state.trusted
+    .map((t) => `<div class="trow-row">
+      <div class="tname">${t.name}<div class="tid num">${t.id}</div></div>
+      <button class="remove" data-id="${t.id}">解除配对</button>
+    </div>`)
+    .join('');
+  box.querySelectorAll('.remove').forEach((b) =>
+    b.addEventListener('click', async () => {
+      await invoke('remove_trusted', { deviceId: b.dataset.id });
+      toast('已解除配对');
+    })
+  );
+}
 
 const txByPeer = {}; // 对端名 → 传输条目 id（一次会话一行）
 let txSeq = 0;
@@ -321,6 +380,10 @@ listen('name-changed', (e) => {
   $('#myOs').textContent = `本机 · ${s.os}`;
   $('#myAvatar').textContent = (s.name || '?').slice(0, 1);
   $('#fpText').textContent = s.fp;
+  $('#myDeviceId').textContent = s.device_id;
+  $('#deviceIdText').textContent = s.device_id;
+  state.trusted = s.trusted || [];
+  renderTrusted();
   $('#dlDir').textContent = s.download_dir;
   $('#nameInput').value = s.name;
   renderTransfers();

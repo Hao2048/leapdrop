@@ -37,7 +37,48 @@ pub struct PrepareResp {
 pub struct HelloResp {
     pub name: String,
     pub fp: String,
+    pub id: String,
     pub v: String,
+}
+
+/// 配对请求（签名覆盖整个请求体原文）
+#[derive(Serialize, Deserialize, Clone)]
+pub struct PairReq {
+    pub device_id: String,
+    pub name: String,
+    /// Ed25519 公钥（32 字节，base64）
+    pub pk: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PairResp {
+    pub accepted: bool,
+    pub status: String, // "ok" | "already"
+    #[serde(default)]
+    pub device_id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub pk: String,
+}
+
+/// 403 需要配对的响应体
+#[derive(Serialize, Deserialize)]
+pub struct NeedPairing {
+    pub error: String, // "need_pairing"
+    pub device_id: String,
+    pub name: String,
+    pub pk: String,
+}
+
+/// 已配对设备（trusted.json 单条记录）
+#[derive(Serialize, Deserialize, Clone)]
+pub struct TrustedPeer {
+    pub id: String,
+    pub name: String,
+    /// base64(32 字节 Ed25519 公钥)
+    pub pk: String,
+    pub paired_at: u64,
 }
 
 pub fn chunk_count(size: u64) -> u64 {

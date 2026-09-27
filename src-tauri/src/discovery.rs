@@ -12,6 +12,7 @@ pub const SERVICE_TYPE: &str = "_leapdrop._tcp.local.";
 #[derive(Serialize, Clone, Debug)]
 pub struct Peer {
     pub id: String, // service instance fullname
+    pub device_id: String, // 对外设备 ID（来自 mDNS TXT）
     pub name: String,
     pub os: String,
     pub fp: String,
@@ -38,6 +39,7 @@ pub fn start(
     identity: &Identity,
     port: u16,
     peers: Arc<Mutex<HashMap<String, Peer>>>,
+    trusted: Arc<Mutex<Vec<crate::protocol::TrustedPeer>>>,
     emitter: crate::Emitter,
 ) -> std::io::Result<Discovery> {
     let daemon = ServiceDaemon::new().map_err(|e| {
@@ -51,6 +53,7 @@ pub fn start(
     props.insert("fp".to_string(), identity.fingerprint.clone());
     props.insert("name".to_string(), identity.name.clone());
     props.insert("os".to_string(), identity.os.clone());
+    props.insert("id".to_string(), identity.device_id.clone());
 
     let ips_csv = crate::identity::local_ipv4s()
         .into_iter()
@@ -70,6 +73,7 @@ pub fn start(
 
     let my_fp = identity.fingerprint.clone();
     let my_fullname = format!("{instance}.{SERVICE_TYPE}");
+    let trusted = trusted;
 
     // 监听循环：解析/移除对端服务，推送 UI（阻塞式 recv，独立线程）
     std::thread::spawn(move || loop {
@@ -85,6 +89,11 @@ pub fn start(
                 let addr = pick_addr(&rs.addresses);
                 let peer = Peer {
                     id: rs.fullname.clone(),
+                    device_id: rs
+                        .txt_properties
+                        .get_property_val_str("id")
+                        .unwrap_or("")
+                        .to_string(),
                     name: rs
                         .txt_properties
                         .get_property_val_str("name")
@@ -106,12 +115,12 @@ pub fn start(
                     last_seen: now(),
                 };
                 peers.lock().ok().map(|mut m| m.insert(peer.id.clone(), peer));
-                emit_peers(&peers, &emitter);
+                emit_peers(&peers, &trusted, &emitter);
             }
             Ok(ServiceEvent::ServiceRemoved(_, fullname)) => {
                 let removed = peers.lock().ok().and_then(|mut m| m.remove(&fullname)).is_some();
                 if removed {
-                    emit_peers(&peers, &emitter);
+                    emit_peers(&peers, &trusted, &emitter);
                 }
             }
             Ok(_) => {}
@@ -135,10 +144,25 @@ fn pick_addr(addrs: &std::collections::HashSet<IpAddr>) -> String {
         .unwrap_or_else(|| "127.0.0.1".into())
 }
 
-pub fn emit_peers(peers: &Arc<Mutex<HashMap<String, Peer>>>, emitter: &crate::Emitter) {
+pub fn emit_peers(
+    peers: &Arc<Mutex<HashMap<String, Peer>>>,
+    trusted: &Arc<Mutex<Vec<crate::protocol::TrustedPeer>>>,
+    emitter: &crate::Emitter,
+) {
     if let Ok(m) = peers.lock() {
-        let mut list: Vec<Peer> = m.values().cloned().collect();
-        list.sort_by(|a, b| a.name.cmp(&b.name));
-        emitter("peers", serde_json::to_value(list).unwrap_or_default());
+        let trusted_ids: Vec<String> = trusted
+            .lock()
+            .map(|t| t.iter().map(|x| x.id.clone()).collect())
+            .unwrap_or_default();
+        let mut list: Vec<serde_json::Value> = m
+            .values()
+            .map(|p| {
+                let mut v = serde_json::to_value(p).unwrap_or_default();
+                v["paired"] = serde_json::Value::Bool(trusted_ids.contains(&p.device_id));
+                v
+            })
+            .collect();
+        list.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+        emitter("peers", serde_json::Value::Array(list));
     }
 }

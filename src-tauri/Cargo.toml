@@ -4,6 +4,10 @@ version = "0.1.0"
 description = "跃传 LeapDrop - 跨平台局域网文件互传"
 edition = "2021"
 
+[lib]
+name = "leapdrop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -22,6 +26,8 @@ rustls = { version = "0.23", features = ["ring"] }
 rustls-pki-types = "1"
 sha2 = "0.10"
 hex = "0.4"
+base64 = "0.22"
+ring = "0.17"
 dirs = "6"
 hostname = "0.4"
 rand = "0.8"
@@ -30,3 +36,7 @@ if-addrs = "0.13"
 [profile.release]
 lto = true
 strip = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"

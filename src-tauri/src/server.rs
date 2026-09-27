@@ -1,5 +1,6 @@
 // 接收端：HTTPS 服务（axum + rustls 自签证书）
-// 端点：GET /api/hello | POST /api/prepare（长轮询等用户确认）| PUT /api/chunk/{token}/{file}/{idx} | POST /api/finalize/{token}
+// 端点：GET /api/hello | POST /api/pair（配对确认，长轮询）| POST /api/prepare（配对+验签+长轮询确认）
+//       | PUT /api/chunk/{token}/{file}/{idx} | POST /api/finalize/{token}
 use crate::protocol::*;
 use crate::AppState;
 use axum::body::Bytes;
@@ -7,6 +8,7 @@ use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
+use base64::Engine as _;
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -21,6 +23,14 @@ pub struct Session {
     pub decided: Option<bool>,          // 用户是否已决定
     pub notify: Arc<tokio::sync::Notify>,
     pub finalized: bool,
+}
+
+/// 一次配对请求会话
+pub struct PairSession {
+    pub req: PairReq,
+    pub created: Instant,
+    pub decided: Option<bool>,
+    pub notify: Arc<tokio::sync::Notify>,
 }
 
 pub struct ServerShared {
@@ -45,6 +55,7 @@ pub async fn start(app: Arc<AppState>) -> std::io::Result<u16> {
     let shared = Arc::new(ServerShared { app: app.clone() });
     let router = Router::new()
         .route("/api/hello", get(hello))
+        .route("/api/pair", post(pair))
         .route("/api/prepare", post(prepare))
         .route("/api/chunk/{token}/{file}/{idx}", put(chunk))
         .route("/api/finalize/{token}", post(finalize))
@@ -67,26 +78,145 @@ async fn hello(State(s): State<Arc<ServerShared>>) -> Json<HelloResp> {
     Json(HelloResp {
         name: id.name.clone(),
         fp: id.fingerprint.clone(),
+        id: id.device_id.clone(),
         v: VERSION.to_string(),
     })
 }
 
-/// 发起传输：登记会话 → 弹 UI 确认 → 长轮询等待决定 → 返回 token + 续传 bitmap
+/// 我方信息（用于配对响应 / 403 提示）
+fn my_info(app: &AppState) -> (String, String, String) {
+    let id = app.identity.read().unwrap();
+    (
+        id.device_id.clone(),
+        id.name.clone(),
+        base64::engine::general_purpose::STANDARD.encode(&id.device_pk),
+    )
+}
+
+/// 配对：验证签名（绑定 ID+公钥）→ 已配对直接成功；否则弹 UI 确认（长轮询 ≤60s）
+async fn pair(
+    State(s): State<Arc<ServerShared>>,
+    headers: HeaderMap,
+    body: String,
+) -> Result<Json<PairResp>, (StatusCode, Json<serde_json::Value>)> {
+    let req: PairReq = serde_json::from_str(&body)
+        .map_err(|_| (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "bad_body"}))))?;
+    let sig = headers
+        .get("x-leapdrop-sig")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| base64::engine::general_purpose::STANDARD.decode(v).ok())
+        .unwrap_or_default();
+    let pk = base64::engine::general_purpose::STANDARD
+        .decode(&req.pk)
+        .unwrap_or_default();
+    // 签名覆盖整个请求体原文，证明请求方持有该公钥对应的私钥
+    if pk.is_empty() || sig.is_empty() || !crate::identity::verify(&pk, body.as_bytes(), &sig) {
+        return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "bad_signature"}))));
+    }
+    if crate::identity::device_id_of(&pk) != req.device_id {
+        return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "id_mismatch"}))));
+    }
+
+    // 已配对：幂等返回
+    if s.app.trusted.lock().unwrap().iter().any(|t| t.id == req.device_id && t.pk == req.pk) {
+        let (id, name, pk) = my_info(&s.app);
+        return Ok(Json(PairResp { accepted: true, status: "already".into(), device_id: id, name, pk }));
+    }
+
+    let token = crate::random_token();
+    let notify = Arc::new(tokio::sync::Notify::new());
+    {
+        let mut ps = s.app.pair_sessions.lock().unwrap();
+        ps.insert(
+            token.clone(),
+            PairSession { req: req.clone(), created: Instant::now(), decided: None, notify: notify.clone() },
+        );
+    }
+
+    (s.app.emitter)(
+        "pair-incoming",
+        serde_json::json!({"token": token, "deviceId": req.device_id, "name": req.name}),
+    );
+
+    tokio::select! {
+        _ = notify.notified() => {}
+        _ = tokio::time::sleep(Duration::from_secs(60)) => {}
+    }
+    let accepted = s.app
+        .pair_sessions
+        .lock()
+        .unwrap()
+        .get(&token)
+        .and_then(|x| x.decided)
+        .unwrap_or(false);
+    s.app.pair_sessions.lock().unwrap().remove(&token);
+    if !accepted {
+        (s.app.emitter)("pair-closed", serde_json::json!({"token": token}));
+        return Ok(Json(PairResp { accepted: false, status: String::new(), device_id: String::new(), name: String::new(), pk: String::new() }));
+    }
+
+    // 记住对方
+    crate::add_trusted(&s.app, TrustedPeer {
+        id: req.device_id.clone(),
+        name: req.name.clone(),
+        pk: req.pk.clone(),
+        paired_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+    });
+    let (id, name, pk) = my_info(&s.app);
+    Ok(Json(PairResp { accepted: true, status: "ok".into(), device_id: id, name, pk }))
+}
+
+/// UI 命令：用户对配对弹窗做出决定
+pub fn respond_pair(app: &AppState, token: &str, accept: bool) {
+    let mut ps = app.pair_sessions.lock().unwrap();
+    if let Some(session) = ps.get_mut(token) {
+        session.decided = Some(accept);
+        session.notify.notify_waiters();
+    }
+}
+
+/// 发起传输：配对门禁（ID 在信任列表 + 签名验证）→ 弹 UI 确认 → 长轮询 → 返回 token + 续传 bitmap
 async fn prepare(
     State(s): State<Arc<ServerShared>>,
     headers: HeaderMap,
-    Json(req): Json<PrepareReq>,
-) -> Result<Json<PrepareResp>, StatusCode> {
-    let peer_name = headers
-        .get("x-leapdrop-name")
+    body: String,
+) -> Result<Json<PrepareResp>, (StatusCode, Json<NeedPairing>)> {
+    let need_pairing = |app: &AppState| {
+        let (id, name, pk) = my_info(app);
+        (StatusCode::FORBIDDEN, Json(NeedPairing { error: "need_pairing".into(), device_id: id, name, pk }))
+    };
+
+    let sender_id = headers
+        .get("x-leapdrop-id")
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("未知设备")
+        .unwrap_or("")
         .to_string();
+    let trusted = {
+        let list = s.app.trusted.lock().unwrap();
+        list.iter().find(|t| t.id == sender_id).cloned()
+    };
+    let Some(trusted) = trusted else {
+        return Err(need_pairing(&s.app));
+    };
+    // 验签：签名覆盖 prepare 请求体原文
+    let sig = headers
+        .get("x-leapdrop-sig")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| base64::engine::general_purpose::STANDARD.decode(v).ok())
+        .unwrap_or_default();
+    let pk = base64::engine::general_purpose::STANDARD.decode(&trusted.pk).unwrap_or_default();
+    if pk.is_empty() || !crate::identity::verify(&pk, body.as_bytes(), &sig) {
+        return Err(need_pairing(&s.app));
+    }
+
+    let req: PrepareReq = serde_json::from_str(&body)
+        .map_err(|_| (StatusCode::BAD_REQUEST, Json(NeedPairing { error: "bad_body".into(), device_id: String::new(), name: String::new(), pk: String::new() })))?;
+    let peer_name = trusted.name.clone();
     let token = crate::random_token();
     let tmp_dir = s.app.download_dir.join(".leapdrop-tmp").join(&token);
     tokio::fs::create_dir_all(&tmp_dir)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(NeedPairing { error: "io".into(), device_id: String::new(), name: String::new(), pk: String::new() })))?;
 
     let notify = Arc::new(tokio::sync::Notify::new());
     {
@@ -349,4 +479,6 @@ pub fn sweep_expired(app: &AppState) {
             let _ = std::fs::remove_dir_all(&s.tmp_dir);
         }
     }
+    let mut ps = app.pair_sessions.lock().unwrap();
+    ps.retain(|_, s| s.created.elapsed() < Duration::from_secs(10 * 60));
 }

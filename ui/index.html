@@ -31,7 +31,10 @@
           <h2>附近的设备</h2>
           <p class="sub">同一网络自动发现（mDNS）· 直连传输 · 全程加密</p>
         </div>
-        <span class="netpill" id="netpill"><i></i>扫描中…</span>
+        <div class="headpills">
+          <span class="idpill" title="本机设备 ID">ID <b id="myDeviceId" class="num">…</b></span>
+          <span class="netpill" id="netpill"><i></i>扫描中…</span>
+        </div>
       </div>
 
       <div class="perm-banner" id="permBanner" hidden>
@@ -94,7 +97,11 @@
           <button class="btn primary sm" id="saveName">保存</button>
         </div>
         <div class="srow">
-          <div class="t"><b>设备指纹</b><small>用于加密身份校验，防止局域网内被冒充</small></div>
+          <div class="t"><b>设备 ID</b><small>配对时与对方核对，两台设备首次互传前需配对一次</small></div>
+          <code class="fp num" id="deviceIdText">…</code>
+        </div>
+        <div class="srow">
+          <div class="t"><b>证书指纹</b><small>用于加密身份校验，防止局域网内被冒充</small></div>
           <code class="fp" id="fpText">…</code>
         </div>
       </div>
@@ -108,9 +115,14 @@
       </div>
 
       <div class="setsec">
+        <h3>已配对设备</h3>
+        <div id="trustedList"><div class="srow"><div class="t"><small>还没有配对过的设备。首次向一台设备发送文件时，双方确认一次即完成配对。</small></div></div></div>
+      </div>
+
+      <div class="setsec">
         <h3>关于</h3>
         <div class="srow">
-          <div class="t"><b>跃传 LeapDrop</b><small>v0.1.1（P0：局域网互传）· 跨网络配对将在 P1 提供</small></div>
+          <div class="t"><b>跃传 LeapDrop</b><small>v0.2.0 · 设备配对 + 局域网互传</small></div>
         </div>
       </div>
 
@@ -136,6 +148,24 @@
       <button class="btn primary" id="inAccept">保存到下载目录</button>
     </div>
     <p class="encnote">传输全程加密（TLS，证书指纹已核对）</p>
+  </div>
+</div>
+
+<!-- 配对请求弹窗 -->
+<div class="veil" id="pairVeil" hidden>
+  <div class="modal" role="dialog" aria-label="设备配对请求">
+    <h3>配对请求</h3>
+    <p class="from">设备 <b id="pairName"></b> 请求与这台设备配对</p>
+    <div class="pair-id-box">
+      <small>对方设备 ID</small>
+      <b class="num" id="pairId"></b>
+      <small>请与对方屏幕上显示的 ID 核对一致后确认</small>
+    </div>
+    <div class="mrow">
+      <button class="btn ghost" id="pairReject">拒绝</button>
+      <button class="btn primary" id="pairAccept">确认配对</button>
+    </div>
+    <p class="encnote">配对后双方即可互传文件；可在 设置 → 已配对设备 中解除</p>
   </div>
 </div>
 
