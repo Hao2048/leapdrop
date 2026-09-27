@@ -2,7 +2,7 @@
 
 [![release](https://github.com/peng411528/leapdrop/actions/workflows/release.yml/badge.svg)](../../actions)
 
-跨平台局域网文件互传（macOS / Windows / Android）。**设备配对 + mDNS 自动发现 + TLS 直传 + 接收确认 + 断点续传**，无需服务器、文件不出局域网。
+跨平台局域网文件互传（macOS / Windows / Android / iOS）。**设备配对 + mDNS 自动发现 + TLS 直传 + 接收确认 + 断点续传**，无需服务器、文件不出局域网。
 
 ## 设备配对（v0.2.0 新增）
 
@@ -16,6 +16,7 @@
 |---|---|---|
 | macOS (Apple Silicon / Intel 通用) | `LeapDrop_x.x.x_universal.dmg` | 未签名，首次打开见下方步骤；并允许「本地网络」权限 |
 | Android 8+ (arm64) | `leapdrop-android-arm64.apk` | 直接安装；首次运行允许「位置/附近设备」与网络权限 |
+| iOS 模拟器 (arm64) | `leapdrop-ios-simulator-arm64.zip` | 解压后拖入模拟器安装；真机请按 README「发布 iOS」用 Xcode 签名运行 |
 | Windows 10/11 x64 | `leapdrop-windows-x64.zip` | 解压运行 `leapdrop.exe`；需系统自带 WebView2 运行时（Win11 已内置）；SmartScreen 提示时点「仍要运行」，防火墙勾选「专用网络」 |
 
 ### macOS 首次打开（未签名应用的放行步骤）
@@ -68,6 +69,23 @@ hdiutil create -volname LeapDrop -srcfolder /tmp/dmgstage -ov -format UDZO LeapD
 ```
 
 签名后收件人首次打开：双击被拦 → 系统设置 → 隐私与安全性 → 「仍要打开」（或 `xattr -dr com.apple.quarantine /Applications/LeapDrop.app`）。若购买 Apple Developer 账号，可将 `-` 换成 Developer ID 证书并做公证，收件人双击直开。
+
+### 发布 iOS（模拟器包 / 真机）
+
+前置：Xcode（含许可已接受）+ iOS 模拟器运行时（`xcodebuild -downloadPlatform iOS`）+ `xcodegen` 与依赖见下。
+
+```bash
+cd src-tauri
+cargo tauri ios init          # 首次；需 xcodegen 在 PATH（本仓库无需 CocoaPods/libimobiledevice，
+                              # 可放置同名桩脚本于 PATH：~/tools/stub-bin/{pod,idevicesyslog}）
+bash ../scripts/fix-ios-swift-symbols.sh   # ⚠️ Xcode 27 swiftc 把 @_cdecl 符号编成局部符号，
+                                           # 需将 Swift 静态库中的关键符号提升为全局后重链（脚本自动完成）
+cargo tauri ios build --target aarch64-sim # 模拟器包 → gen/apple/build/arm64-sim/LeapDrop.app
+```
+
+真机安装：Xcode → Settings → Accounts 登录 Apple ID → 打开 `gen/apple/leapdrop.xcodeproj` 选 Team 后 Run，或在 `tauri.conf.json` 配 `bundle.iOS.developmentTeam` 后 `cargo tauri ios build --target aarch64`。
+
+> iOS 的本地网络/位置权限声明见 `src-tauri/Info.ios.plist`（构建时自动合并）。
 
 ### 发布 Windows exe（macOS 交叉编译）
 
