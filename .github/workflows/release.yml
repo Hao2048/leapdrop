@@ -1,0 +1,53 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            tauri-args: --target universal-apple-darwin
+          - os: windows-latest
+            rust-targets: x86_64-pc-windows-msvc
+            tauri-args: ''
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --locked
+
+      - name: Build and upload to Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: '跃传 LeapDrop ${{ github.ref_name }}'
+          releaseBody: |
+            局域网文件互传 P0：mDNS 自动发现 + TLS 直传 + 接收确认 + 断点续传。
+
+            **首次运行权限（都需要允许，否则扫描不到设备）：**
+            - macOS：本地网络权限 + 防火墙；安装包未签名，首次打开请右键 → 打开
+            - Windows：防火墙弹窗勾选「专用网络」；SmartScreen 提示点「仍要运行」
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.tauri-args }}

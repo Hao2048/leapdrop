@@ -1,0 +1,15 @@
+# Rust
+src-tauri/target/
+
+# 本机专用的工具链配置（SDK 回落），不入库以免影响 CI
+src-tauri/.cargo/config.toml
+
+# 打包产物
+*.dmg
+*.msi
+*.exe
+src-tauri/gen/
+
+# 系统杂项
+.DS_Store
+src-tauri/icons/icon.iconset/
