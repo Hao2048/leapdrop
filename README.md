@@ -2,7 +2,7 @@
 
 [![release](https://github.com/peng411528/leapdrop/actions/workflows/release.yml/badge.svg)](../../actions)
 
-跨平台局域网文件互传（macOS / Windows / Android / iOS）。**设备配对 + mDNS 自动发现 + TLS 直传 + 接收确认 + 断点续传**，无需服务器、文件不出局域网。
+跨平台局域网文件互传（macOS / Windows / Android；iOS 工程就绪但暂缓）。**设备配对 + mDNS 自动发现 + TLS 直传 + 接收确认 + 断点续传**，无需服务器、文件不出局域网。
 
 ## 设备配对（v0.2.0 新增）
 
@@ -16,7 +16,7 @@
 |---|---|---|
 | macOS (Apple Silicon / Intel 通用) | `LeapDrop_x.x.x_universal.dmg` | 未签名，首次打开见下方步骤；并允许「本地网络」权限 |
 | Android 8+ (arm64) | `leapdrop-android-arm64.apk` | 直接安装；首次运行允许「位置/附近设备」与网络权限 |
-| iOS 模拟器 (arm64) | `leapdrop-ios-simulator-arm64.zip` | 解压后拖入模拟器安装；真机请按 README「发布 iOS」用 Xcode 签名运行 |
+| iOS（暂缓） | `leapdrop-ios-simulator-arm64.zip` | 仅模拟器包。真机分发受苹果签名政策限制（免费账号需逐台注册设备且 7 天过期；公开分发需 ¥688/年 开发者账号走 TestFlight/App Store），故 iOS 暂不作为正式支持平台，工程与构建链路已就绪 |
 | Windows 10/11 x64 | `leapdrop-windows-x64.zip` | 解压运行 `leapdrop.exe`；需系统自带 WebView2 运行时（Win11 已内置）；SmartScreen 提示时点「仍要运行」，防火墙勾选「专用网络」 |
 
 ### macOS 首次打开（未签名应用的放行步骤）
