@@ -1,4 +1,4 @@
-# 在 Windows PowerShell 中，从已提交的源码构建免安装 x64 版本。
+﻿# 在 Windows PowerShell 中，从已提交的源码构建免安装 x64 版本。
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path $PSScriptRoot -Parent
 Set-Location $projectRoot
@@ -11,6 +11,7 @@ New-Item -ItemType Directory -Force $artifactDir, $stage | Out-Null
 try {
 Copy-Item target/x86_64-pc-windows-msvc/release/leapdrop.exe $stage -Force
 Copy-Item docs/quick-start.txt "$stage/使用说明.txt" -Force
+Copy-Item LICENSE "$stage/LICENSE" -Force
 Compress-Archive -Path "$stage/*" -DestinationPath "$artifactDir/LeapDrop_${version}_Windows_x64.zip" -Force
 } finally {
     Remove-Item $stage -Recurse -Force

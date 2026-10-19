@@ -17,6 +17,7 @@ archive = output / f'LeapDrop_{version}_Windows_x64.zip'
 with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
     z.write(build / 'x86_64-pc-windows-msvc/release/leapdrop.exe', 'leapdrop.exe')
     z.write(root / 'docs/quick-start.txt', '使用说明.txt')
+    z.write(root / 'LICENSE', 'LICENSE')
 with zipfile.ZipFile(archive) as z:
     assert z.testzip() is None, 'ZIP validation failed'
 print(archive)
