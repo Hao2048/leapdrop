@@ -1,144 +1,108 @@
 # 跃传 LeapDrop
 
-[![release](https://github.com/peng411528/leapdrop/actions/workflows/release.yml/badge.svg)](../../actions)
+**简单好用的 Mac / Windows 局域网文件互传工具。**
 
-跨平台局域网文件互传（macOS / Windows / Android；iOS 工程就绪但暂缓）。**设备配对 + mDNS 自动发现 + TLS 直传 + 接收确认 + 断点续传**，无需服务器、文件不出局域网。
+同一网络，自动发现，拖入即传。无需账号、无需配对、无需上传网盘，文件直接在两台电脑之间传输。
 
-## 设备配对（v0.2.0 新增）
+[下载最新版](https://github.com/peng411528/leapdrop/releases/latest) · [查看所有版本](https://github.com/peng411528/leapdrop/releases)
 
-每台设备首次启动生成永不变更的 **设备 ID**（形如 `3F7A-92C1`，可在设置页查看）。两台设备**首次互传前需配对一次**：发起方点发送后，对方屏幕弹出配对确认（显示双方设备 ID），双方确认后互相保存，之后免确认直传（每次传文件仍有接收确认）。解除配对：设置 → 已配对设备 → 解除配对。所有传输请求带 Ed25519 设备签名，未配对设备的请求一律拒绝。
+## 适合什么时候用
 
-## 下载
+- **Mac 与 Windows 互传**：把设计稿、文档、照片或视频，从 Mac 发给旁边的 Windows 电脑。
+- **办公室临时协作**：同事在同一 Wi-Fi 下交换文件，省去建共享文件夹和上传网盘的步骤。
+- **家里多台电脑之间传文件**：台式机和笔记本同时打开跃传，即可发送素材、资料或压缩包。
+- **不方便使用云盘时**：连接同一局域网即可使用，文件传输不依赖互联网或第三方服务器。
 
-到 [Releases](../../releases) 页下载对应平台可执行文件：
+## 三步开始
 
-| 平台 | 文件 | 说明 |
-|---|---|---|
-| macOS (Apple Silicon / Intel 通用) | `LeapDrop_x.x.x_universal.dmg` | 未签名，首次打开见下方步骤；并允许「本地网络」权限 |
-| Android 8+ (arm64) | `leapdrop-android-arm64.apk` | 直接安装；首次运行允许「位置/附近设备」与网络权限 |
-| iOS（暂缓） | `leapdrop-ios-simulator-arm64.zip` | 仅模拟器包。真机分发受苹果签名政策限制（免费账号需逐台注册设备且 7 天过期；公开分发需 ¥688/年 开发者账号走 TestFlight/App Store），故 iOS 暂不作为正式支持平台，工程与构建链路已就绪 |
-| Windows 10/11 x64 | `leapdrop-windows-x64.zip` | 解压运行 `leapdrop.exe`；需系统自带 WebView2 运行时（Win11 已内置）；SmartScreen 提示时点「仍要运行」，防火墙勾选「专用网络」 |
+1. 两台电脑连接同一 Wi-Fi / 局域网，并打开跃传。
+2. 在「设备」页选中对方电脑，拖入文件，或点击选择文件。
+3. 接收方点击「保存到下载目录」，文件即开始传输。
 
-### macOS 首次打开（未签名应用的放行步骤）
+**不注册、不配对、不填 IP 地址。** 接收到的文件保存在系统下载目录下的 `LeapDrop/` 文件夹。
 
-双击被系统拦截（「无法验证开发者」/「无法检查是否包含恶意软件」）后，**二选一**：
+## 下载安装
 
-- **系统设置法**：系统设置 → 隐私与安全性 → 「安全性」区块出现「已阻止使用 LeapDrop」→ 点 **仍要打开** → 输密码 → 再双击即可，之后不会再弹
-- **终端法**（把 app 拖进「应用程序」后执行一行）：
+| 平台 | 下载文件 | 使用方式 |
+| --- | --- | --- |
+| macOS 11 及以上，Apple Silicon / Intel | `LeapDrop_0.3.0_macOS_universal.dmg` | 打开 DMG，将 LeapDrop 拖入「应用程序」 |
+| Windows 10 / 11，64 位 | `LeapDrop_0.3.0_Windows_x64.zip` | 解压后双击 `leapdrop.exe`，无需安装 |
 
-  ```bash
-  xattr -dr com.apple.quarantine /Applications/LeapDrop.app
-  ```
+请在两台电脑上使用 v0.3.0 或更新的兼容版本。Release 中提供 `SHA256SUMS.txt`，可用于核对下载文件的完整性。
 
-> 注：macOS 13 及更早版本可直接 右键 → 打开；macOS 15+ 不再支持右键绕过，请用上面两种方法。
+### 首次启动
 
-首次运行还需要允许：macOS 的「本地网络」权限与防火墙；Windows 防火墙（勾选专用网络）。
+- **macOS**：本版本采用本地 ad-hoc 签名，尚未经过 Apple 公证。系统拦截时，在「系统设置 → 隐私与安全性」中找到 LeapDrop，选择「仍要打开」。允许「本地网络」及防火墙传入连接。
+- **Windows**：需要 Microsoft WebView2 运行时（多数 Windows 10 / 11 设备已安装）。缺少时从 [微软官网下载](https://developer.microsoft.com/microsoft-edge/webview2/)。防火墙提示时允许「专用网络」；未签名程序可能触发 SmartScreen，请核对下载来源。
 
-## 功能（P0）
+## 核心功能
 
-- 同一局域网内自动发现设备（mDNS / `_leapdrop._tcp.local.`），雷达式设备列表
-- 拖拽 / 文件对话框发送，接收方弹窗确认后才开始传输
-- 全程 TLS：自签证书 + **证书指纹钉扎**（mDNS TXT 公布指纹，发送方校验对端证书一致，防局域网中间人）
-- 4MB 分块并行度友好传输、sha256 整文件校验、断点续传（bitmap 边车）
-- 接收文件保存到 `~/Downloads/LeapDrop`，重名自动加序号
+- **自动发现**：同一局域网内自动列出在线设备，无需手动输入地址。
+- **直接发送**：发现即可发起传输，支持拖拽、多选、中文文件名和空文件。
+- **自己决定是否接收**：「设置 → 允许接收文件」默认开启，自动记住上次选择；每次保存前仍需确认。
+- **随时关闭接收**：关闭后自动拒绝新请求和待确认请求，仍可向其他设备发送；已开始的传输继续完成。
+- **加密直传**：文件通过 HTTPS 在两台电脑之间传输，发送端核对发现信息中的证书指纹。
+- **校验与进度**：显示发送 / 接收进度，以 SHA-256 校验文件内容，同名文件自动加序号。
 
-## 构建与运行
+跃传专注于局域网内传文件。当前不支持文件夹（可先压缩）、跨互联网传输、断点续传、暂停或取消。中断后需重新发送。设备名称来自对方自行声明，首次发现的设备没有经过身份认证，请在可信的局域网内使用，并核对接收请求。
 
-前置：Rust（rustup stable）、macOS 需要 Xcode Command Line Tools；Windows 需要 VS Build Tools；Android 需要 JDK17 + Android SDK/NDK（`cargo tauri android init` 一次，`cargo tauri android build --apk --target aarch64` 出包）。
+## 开发运行
 
-```bash
-cd src-tauri
-cargo run        # 开发运行（首次编译约几分钟）
-cargo test       # 集成测试：TLS 回环传输 + 拒绝流程
-cargo build --release   # 发布构建（产物在 target/release/leapdrop）
+安装 Rust stable。macOS 需要 Xcode Command Line Tools；Windows 需要 Visual Studio C++ Build Tools 和 WebView2 运行时。前端为原生 HTML / CSS / JavaScript，无需 Node 构建或安装 npm 依赖。
+
+在项目根目录执行：
+
+```sh
+cargo run -p leapdrop
+cargo test --workspace --locked
+cargo fmt --all -- --check
 ```
 
-### 发布 macOS dmg（关键：打包后必须 ad-hoc 签名）
+只编译本机可执行文件：
 
-`cargo tauri build` 产出的 .app **没有完整签名**，直接分发在新版 macOS 上会报「已损坏」且无法放行。必须补一步签名再重新做 dmg：
-
-```bash
-cargo tauri build --target universal-apple-darwin
-APP=target/universal-apple-darwin/release/bundle/macos/LeapDrop.app
-codesign --force --deep --sign - "$APP"     # ad-hoc 完整签名
-codesign --verify --deep "$APP"             # 必须输出通过
-# 从签名后的 app 重新生成 dmg
-rm -rf /tmp/dmgstage && mkdir /tmp/dmgstage
-cp -R "$APP" /tmp/dmgstage/ && ln -s /Applications /tmp/dmgstage/Applications
-hdiutil create -volname LeapDrop -srcfolder /tmp/dmgstage -ov -format UDZO LeapDrop_0.1.1_universal.dmg
+```sh
+cargo build -p leapdrop --release --locked
 ```
 
-签名后收件人首次打开：双击被拦 → 系统设置 → 隐私与安全性 → 「仍要打开」（或 `xattr -dr com.apple.quarantine /Applications/LeapDrop.app`）。若购买 Apple Developer 账号，可将 `-` 换成 Developer ID 证书并做公证，收件人双击直开。
+发布打包使用 `scripts/package-macos.sh`、`scripts/package-windows.ps1`；Mac 交叉编译 Windows 可用 `scripts/package-windows-cross.sh`。详见 [开发约定](docs/development.md)。所有编译文件与安装包都输出到根目录 `target/`，最终分发文件统一放 `target/release-artifacts/`，不提交 Git。
 
-### 发布 iOS（模拟器包 / 真机）
+本机若因新 macOS SDK 出现 `tapi error`，可临时指定已安装的兼容 SDK，例如：
 
-前置：Xcode（含许可已接受）+ iOS 模拟器运行时（`xcodebuild -downloadPlatform iOS`）+ `xcodegen` 与依赖见下。
-
-```bash
-cd src-tauri
-cargo tauri ios init          # 首次；需 xcodegen 在 PATH（本仓库无需 CocoaPods/libimobiledevice，
-                              # 可放置同名桩脚本于 PATH：~/tools/stub-bin/{pod,idevicesyslog}）
-bash ../scripts/fix-ios-swift-symbols.sh   # ⚠️ Xcode 27 swiftc 把 @_cdecl 符号编成局部符号，
-                                           # 需将 Swift 静态库中的关键符号提升为全局后重链（脚本自动完成）
-cargo tauri ios build --target aarch64-sim # 模拟器包 → gen/apple/build/arm64-sim/LeapDrop.app
+```sh
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk cargo run -p leapdrop
 ```
 
-真机安装：Xcode → Settings → Accounts 登录 Apple ID → 打开 `gen/apple/leapdrop.xcodeproj` 选 Team 后 Run，或在 `tauri.conf.json` 配 `bundle.iOS.developmentTeam` 后 `cargo tauri ios build --target aarch64`。
+## 项目结构
 
-> iOS 的本地网络/位置权限声明见 `src-tauri/Info.ios.plist`（构建时自动合并）。
-
-### 发布 Windows exe（macOS 交叉编译）
-
-```bash
-# 前置：安装 LLVM（需要 clang-cl/llvm-lib/llvm-rc）并加入 PATH；rustup target add x86_64-pc-windows-msvc
-cargo xwin build --release --target x86_64-pc-windows-msvc
-# target/x86_64-pc-windows-msvc/release/leapdrop.exe 打 zip 分发
-```
-
-> 本机若遇到 `tapi error: malformed file ... MacOSX27.0.sdk`（CLT 新 SDK 与链接器不兼容），仓库已在 `src-tauri/.cargo/config.toml` 固定 `SDKROOT=MacOSX26.5.sdk`。
-
-首次运行 macOS 会弹两个系统授权，都需要允许：
-
-1. **本地网络**（Local Network）——mDNS 发现必需；拒绝后可在 系统设置 → 隐私与安全性 → 本地网络 里重新开启
-2. **防火墙**（未签名开发版）——接收连接
-
-Windows 首次运行防火墙弹窗请勾选“专用网络”允许。跨机互传时两台机器都要运行本程序、同一网段（注意 2.4G/5G 频段隔离和 AP 隔离）。
-
-## 目录结构
-
-```
+```text
 leapdrop/
-├── ui/                    # 前端（零构建，纯 HTML/JS，Tauri webview 直接加载）
+├── Cargo.toml           # 单应用 workspace、发布编译配置
+├── Cargo.lock           # 唯一依赖锁文件，需提交
+├── README.md
+├── docs/
+│   └── development.md  # 文件管理、模块职责、验证流程
+├── scripts/             # Mac / Windows 发布打包脚本
+├── ui/                  # 界面源码，Tauri 直接加载
 │   ├── index.html
 │   ├── style.css
 │   └── app.js
 └── src-tauri/
-    ├── src/
-    │   ├── lib.rs         # Tauri 命令/事件接线、AppState
-    │   ├── identity.rs    # 自签证书生成/持久化、指纹、网卡枚举
-    │   ├── discovery.rs   # mDNS 注册与监听 → peers 事件
-    │   ├── protocol.rs    # 共享消息类型（prepare/chunk/finalize）
-    │   ├── server.rs      # 接收端 HTTPS（axum+rustls）、会话、分块落盘、校验
-    │   └── sender.rs      # 发送端（reqwest+证书钉扎）、分块上传、进度
-    └── tests/transfer.rs  # 无 GUI 集成测试
+    ├── Cargo.toml
+    ├── build.rs
+    ├── tauri.conf.json   # 桌面窗口与打包配置
+    ├── Info.plist        # macOS 本地网络权限声明
+    ├── capabilities/     # Tauri 窗口权限
+    ├── icons/            # 应用图标源资源
+    ├── src/              # Rust 设备发现、身份、发送、接收逻辑
+    └── tests/transfer.rs # 无 GUI 的真实 HTTPS 传输测试
 ```
 
-## 协议摘要
+## 使用与排查
 
-```
-POST /api/prepare   {files:[{name,size,sha256,chunk_size,chunks}], total}
-                    → 长轮询对端用户决定（≤90s）
-                    ← {accepted, token, resume:{fileIdx:[chunkIdx…]}}
-PUT  /api/chunk/{token}/{fileIdx}/{chunkIdx}   body=4MB 原始字节
-POST /api/finalize/{token}   → 对端流式 sha256 校验并落盘
-```
+1. 两台电脑连接同一 Wi-Fi / 网段，均启动应用。
+2. macOS 允许「本地网络」和防火墙传入连接；Windows 防火墙允许「专用网络」。
+3. 选择对方设备，拖入文件；接收方确认保存。
 
-- 指纹 = sha256(cert_der)（hex）；换网络重签证书时指纹随之更新并通过 mDNS 重新公布
-- P1 计划：身份密钥与证书分离（指纹=公钥哈希）、TOFU 信任存储、WebRTC 跨网配对（见方案文档三通道模型）
+扫描不到时检查访客网络、AP 隔离、VPN 与多网卡。发现使用 UDP 5353，文件接收优先使用 TCP 52920，端口占用时自动分配并通过 mDNS 公布。当前对每台设备只选择一个连接地址，多网卡环境可能选到不可达地址。
 
-## 已知限制（P0）
-
-- 只发文件不发文件夹（拖入文件夹会跳过）
-- 传输不支持中途暂停/取消 UI（断线自动可续传）
-- 单网卡单地址选择，多网卡环境可能选到不通的地址（P1 改为多候选连接）
-- 图标为占位品牌图，未做签名/公证（macOS 首次打开按 README 的「仍要打开 / xattr」步骤放行）
+设备身份及接收偏好保存在系统应用数据目录（标识 `com.leapdrop.app`），接收暂存文件位于下载目录 `LeapDrop/.leapdrop-tmp/`，均不写入项目源码。未完成会话运行中约 30 分钟后清理；应用异常退出后遗留的暂存目录可手动删除。

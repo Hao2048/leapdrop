@@ -71,7 +71,7 @@
       <div class="vhead">
         <div>
           <h2>传输</h2>
-          <p class="sub">发送与接收进度、历史记录（仅保存在本机）</p>
+          <p class="sub">发送与接收进度（记录仅在本次运行保留）</p>
         </div>
         <button class="btn ghost sm" id="clearTransfers">清空</button>
       </div>
@@ -97,11 +97,11 @@
           <button class="btn primary sm" id="saveName">保存</button>
         </div>
         <div class="srow">
-          <div class="t"><b>设备 ID</b><small>配对时与对方核对，两台设备首次互传前需配对一次</small></div>
+          <div class="t"><b>设备 ID</b><small>用于区分局域网内的同名设备</small></div>
           <code class="fp num" id="deviceIdText">…</code>
         </div>
         <div class="srow">
-          <div class="t"><b>证书指纹</b><small>用于加密身份校验，防止局域网内被冒充</small></div>
+          <div class="t"><b>证书指纹</b><small>用于核对加密连接的证书</small></div>
           <code class="fp" id="fpText">…</code>
         </div>
       </div>
@@ -109,20 +109,23 @@
       <div class="setsec">
         <h3>接收</h3>
         <div class="srow">
+          <div class="t"><label for="receiveEnabled"><b>允许接收文件</b></label><small id="receiveHint">开启后，附近设备可发起传输；每次保存前仍需确认</small></div>
+          <label class="receive-toggle">
+            <span id="receiveStatus" aria-live="polite">已开启</span>
+            <input id="receiveEnabled" type="checkbox" role="switch" checked aria-describedby="receiveHint receiveError">
+          </label>
+        </div>
+        <p class="setting-error" id="receiveError" role="alert" hidden></p>
+        <div class="srow">
           <div class="t"><b>保存目录</b></div>
           <span class="pathval" id="dlDir">…</span>
         </div>
       </div>
 
       <div class="setsec">
-        <h3>已配对设备</h3>
-        <div id="trustedList"><div class="srow"><div class="t"><small>还没有配对过的设备。首次向一台设备发送文件时，双方确认一次即完成配对。</small></div></div></div>
-      </div>
-
-      <div class="setsec">
         <h3>关于</h3>
         <div class="srow">
-          <div class="t"><b>跃传 LeapDrop</b><small>v0.2.0 · 设备配对 + 局域网互传</small></div>
+          <div class="t"><b>跃传 LeapDrop</b><small>v0.3.0 · 简单好用的局域网文件互传</small></div>
         </div>
       </div>
 
@@ -148,24 +151,6 @@
       <button class="btn primary" id="inAccept">保存到下载目录</button>
     </div>
     <p class="encnote">传输全程加密（TLS，证书指纹已核对）</p>
-  </div>
-</div>
-
-<!-- 配对请求弹窗 -->
-<div class="veil" id="pairVeil" hidden>
-  <div class="modal" role="dialog" aria-label="设备配对请求">
-    <h3>配对请求</h3>
-    <p class="from">设备 <b id="pairName"></b> 请求与这台设备配对</p>
-    <div class="pair-id-box">
-      <small>对方设备 ID</small>
-      <b class="num" id="pairId"></b>
-      <small>请与对方屏幕上显示的 ID 核对一致后确认</small>
-    </div>
-    <div class="mrow">
-      <button class="btn ghost" id="pairReject">拒绝</button>
-      <button class="btn primary" id="pairAccept">确认配对</button>
-    </div>
-    <p class="encnote">配对后双方即可互传文件；可在 设置 → 已配对设备 中解除</p>
   </div>
 </div>
 

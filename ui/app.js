@@ -5,7 +5,6 @@ const { listen } = window.__TAURI__.event;
 const $ = (s) => document.querySelector(s);
 const state = {
   peers: [],
-  trusted: [],
   target: null,      // 选中的目标设备 id
   me: null,
   transfers: [],     // {id, dir, peer, name, pct, bytesDone, totalBytes, speed, status}
@@ -13,6 +12,11 @@ const state = {
 };
 
 /* ── 工具 ── */
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
 function fmtBytes(n) {
   if (n == null) return '—';
   if (n < 1024) return `${n} B`;
@@ -71,7 +75,7 @@ function renderPeers() {
     renderTarget();
   }
 
-  state.peers.forEach((p, i) => {
+  state.peers.forEach((p) => {
     const angle = (hashStr(p.id) % 360) * Math.PI / 180;
     const radius = 28 + (hashStr(p.id) % 3) * 9; // 28% / 37% / 46%
     const x = 50 + radius * Math.cos(angle);
@@ -80,10 +84,11 @@ function renderPeers() {
     el.className = 'dev' + (state.target === p.id ? ' selected' : '');
     el.style.left = `${x}%`;
     el.style.top = `${y}%`;
-    el.innerHTML = `<span class="tick">✓ 已选中</span><span class="pairflag ${p.paired ? '' : 'no'}">${p.paired ? '已配对' : '未配对'}</span><b title="${p.name}">${p.name}</b><small class="num">${p.device_id || '????-????'} · ${p.os || ''}</small>`;
+    el.innerHTML = `<span class="tick">✓ 已选中</span><b title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</b><small class="num">${escapeHtml(p.device_id || '????-????')} · ${escapeHtml(p.os || '')}</small>`;
     el.addEventListener('click', () => {
       state.target = state.target === p.id ? null : p.id;
       renderPeers();
+      renderTarget();
     });
     layer.appendChild(el);
   });
@@ -148,16 +153,15 @@ function renderTransfers() {
         t.status === 'done' ? '<span class="badge ok">完成</span>' :
         t.status === 'err' ? '<span class="badge err">失败</span>' :
         t.status === 'rejected' ? '<span class="badge err">已拒绝</span>' :
-        t.status === 'pairing' ? '<span class="badge wait">等待对方确认配对</span>' :
         t.status === 'wait' ? '<span class="badge wait">等待对方确认</span>' :
         '<span class="badge run">传输中</span>';
       return `<div class="trow ${t.status === 'done' ? 'done' : ''} ${t.status === 'err' || t.status === 'rejected' ? 'err' : ''}">
         <div class="top">
           <span class="dir ${t.dir}">${t.dir === 'tx' ? '发送' : '接收'}</span>
-          <span class="fname" title="${t.name}">${t.name}</span>
+          <span class="fname" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>
           ${badge}
         </div>
-        <p class="peer">${t.dir === 'tx' ? '发至' : '来自'} ${t.peer}</p>
+        <p class="peer">${t.dir === 'tx' ? '发至' : '来自'} ${escapeHtml(t.peer)}</p>
         <div class="bar"><i style="width:${t.status === 'done' ? 100 : pct}%"></i></div>
         <div class="stats">
           <span class="num">${fmtBytes(t.bytesDone)} / ${fmtBytes(t.totalBytes)}</span>
@@ -178,12 +182,12 @@ $('#clearTransfers').addEventListener('click', () => {
 function showIncoming(payload) {
   state.incoming = payload;
   $('#inTitle').textContent = `「${payload.peer}」向你发送文件`;
-  $('#inFrom').innerHTML = `来源 ${payload.peer} · 局域网直连`;
+  $('#inFrom').textContent = `来源 ${payload.peer} · 局域网直连`;
   $('#inFiles').innerHTML = payload.files
     .map(
       (f) => `<div class="frow">
         <span class="fico" style="background:${extColor(f.name)}">${ext(f.name)}</span>
-        <span class="fname" title="${f.name}">${f.name}</span>
+        <span class="fname" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
         <span class="fsize num">${fmtBytes(f.size)}</span>
       </div>`
     )
@@ -226,64 +230,37 @@ listen('peers', (e) => {
   renderTarget();
 });
 listen('incoming', (e) => showIncoming(e.payload));
-listen('incoming-closed', () => closeIncoming());
-
-/* ── 配对 ── */
-let pairToken = null;
-listen('pair-incoming', (e) => {
-  pairToken = e.payload.token;
-  $('#pairName').textContent = e.payload.name;
-  $('#pairId').textContent = e.payload.deviceId;
-  $('#pairVeil').hidden = false;
-});
-listen('pair-closed', () => { $('#pairVeil').hidden = true; pairToken = null; });
-$('#pairAccept').addEventListener('click', async () => {
-  if (!pairToken) return;
-  await invoke('respond_pair', { token: pairToken, accept: true });
-  $('#pairVeil').hidden = true;
-  pairToken = null;
-});
-$('#pairReject').addEventListener('click', async () => {
-  if (!pairToken) return;
-  await invoke('respond_pair', { token: pairToken, accept: false });
-  $('#pairVeil').hidden = true;
-  pairToken = null;
-});
-listen('paired', (e) => toast(`已与「${e.payload.name}」完成配对`, 'ok'));
-listen('tx-pairing', (e) => {
-  upsertTransfer({
-    id: txByPeer[e.payload.peer] || ('tx-' + ++txSeq),
-    dir: 'tx', peer: e.payload.peer,
-    name: `首次传输需先配对（${e.payload.peerName} ${e.payload.peerId}）`,
-    bytesDone: 0, totalBytes: null, speed: 0, status: 'pairing',
-  });
-  txByPeer[e.payload.peer] = state.transfers[0]?.id;
-  gotoView('transfers');
-});
-listen('trusted-changed', (e) => {
-  state.trusted = e.payload || [];
-  renderTrusted();
+listen('incoming-closed', (e) => {
+  if (state.incoming?.token === e.payload.token) closeIncoming();
 });
 
-function renderTrusted() {
-  const box = $('#trustedList');
-  if (!state.trusted || !state.trusted.length) {
-    box.innerHTML = '<div class="srow"><div class="t"><small>还没有配对过的设备。首次向一台设备发送文件时，双方确认一次即完成配对。</small></div></div>';
-    return;
-  }
-  box.innerHTML = state.trusted
-    .map((t) => `<div class="trow-row">
-      <div class="tname">${t.name}<div class="tid num">${t.id}</div></div>
-      <button class="remove" data-id="${t.id}">解除配对</button>
-    </div>`)
-    .join('');
-  box.querySelectorAll('.remove').forEach((b) =>
-    b.addEventListener('click', async () => {
-      await invoke('remove_trusted', { deviceId: b.dataset.id });
-      toast('已解除配对');
-    })
-  );
+/* ── 接收开关 ── */
+function renderReceiveSetting(enabled) {
+  if (state.me) state.me.receive_enabled = enabled;
+  $('#receiveEnabled').checked = enabled;
+  $('#receiveStatus').textContent = enabled ? '已开启' : '已关闭';
+  $('#receiveHint').textContent = enabled
+    ? '附近设备可发起传输；每次保存前仍需确认'
+    : '自动拒绝新的文件传输；仍可向其他设备发送文件';
 }
+listen('receive-setting-changed', (e) => renderReceiveSetting(e.payload.enabled));
+$('#receiveEnabled').addEventListener('change', async (e) => {
+  const enabled = e.target.checked;
+  const previous = state.me?.receive_enabled ?? true;
+  e.target.disabled = true;
+  $('#receiveError').hidden = true;
+  $('#receiveStatus').textContent = '保存中…';
+  try {
+    await invoke('set_receive_enabled', { enabled });
+    renderReceiveSetting(enabled);
+  } catch (error) {
+    renderReceiveSetting(previous);
+    $('#receiveError').textContent = `设置未保存：${error}`;
+    $('#receiveError').hidden = false;
+  } finally {
+    e.target.disabled = false;
+  }
+});
 
 const txByPeer = {}; // 对端名 → 传输条目 id（一次会话一行）
 let txSeq = 0;
@@ -364,7 +341,7 @@ listen('rx-done', (e) => {
     upsertTransfer(t);
   }
   if (e.payload.ok) toast(`已保存 ${e.payload.saved.length} 个文件到下载目录`, 'ok');
-  else toast('接收校验失败，文件已保留待续传', 'err');
+  else toast('接收校验失败，请重新发送', 'err');
 });
 listen('name-changed', (e) => {
   if (state.me) state.me.name = e.payload.name;
@@ -382,8 +359,7 @@ listen('name-changed', (e) => {
   $('#fpText').textContent = s.fp;
   $('#myDeviceId').textContent = s.device_id;
   $('#deviceIdText').textContent = s.device_id;
-  state.trusted = s.trusted || [];
-  renderTrusted();
+  renderReceiveSetting(s.receive_enabled);
   $('#dlDir').textContent = s.download_dir;
   $('#nameInput').value = s.name;
   renderTransfers();
