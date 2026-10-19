@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="ui/brand/icon.png" width="112" height="112" alt="跃传 LeapDrop 图标">
+</p>
+
 # 跃传 LeapDrop
 
 **简单好用的 Mac / Windows 局域网文件互传工具。**
@@ -25,8 +29,8 @@
 
 | 平台 | 下载文件 | 使用方式 |
 | --- | --- | --- |
-| macOS 11 及以上，Apple Silicon / Intel | `LeapDrop_0.3.0_macOS_universal.dmg` | 打开 DMG，将 LeapDrop 拖入「应用程序」 |
-| Windows 10 / 11，64 位 | `LeapDrop_0.3.0_Windows_x64.zip` | 解压后双击 `leapdrop.exe`，无需安装 |
+| macOS 11 及以上，Apple Silicon / Intel | `LeapDrop_0.3.1_macOS_universal.dmg` | 打开 DMG，将 LeapDrop 拖入「应用程序」 |
+| Windows 10 / 11，64 位 | `LeapDrop_0.3.1_Windows_x64.zip` | 解压后双击 `leapdrop.exe`，无需安装 |
 
 请在两台电脑上使用 v0.3.0 或更新的兼容版本。Release 中提供 `SHA256SUMS.txt`，可用于核对下载文件的完整性。
 
@@ -106,3 +110,7 @@ leapdrop/
 扫描不到时检查访客网络、AP 隔离、VPN 与多网卡。发现使用 UDP 5353，文件接收优先使用 TCP 52920，端口占用时自动分配并通过 mDNS 公布。当前对每台设备只选择一个连接地址，多网卡环境可能选到不可达地址。
 
 设备身份及接收偏好保存在系统应用数据目录（标识 `com.leapdrop.app`），接收暂存文件位于下载目录 `LeapDrop/.leapdrop-tmp/`，均不写入项目源码。未完成会话运行中约 30 分钟后清理；应用异常退出后遗留的暂存目录可手动删除。
+
+## 开源协议
+
+本项目采用 [MIT License](LICENSE)。版权声明和许可全文随源码及 Mac / Windows 软件包一同提供。

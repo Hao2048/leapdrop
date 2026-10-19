@@ -63,3 +63,8 @@ cargo build -p leapdrop --locked
 - 从 Mac 交叉编译 Windows：`LLVM_BIN=/path/to/llvm/bin bash scripts/package-windows-cross.sh`。需要 cargo-xwin 与 LLVM；本机 SDK 不兼容时同样通过 `SDKROOT` 指定可用的 Mac SDK。
 - 最终分发文件统一放 `target/release-artifacts/`，只上传到 GitHub Release，不提交 Git。校验清单为该目录内分发文件的 SHA-256。
 - `docs/quick-start.txt` 随 Mac / Windows 包一起分发；对应版本的发布说明放 `docs/releases/`。
+
+## 图标与许可
+
+- 图标唯一源文件为 `ui/brand/icon.png`，运行 `bash scripts/generate-icons.sh` 派生桌面图标；不要手工分别修改各个平台的缩略图。设计说明和生成提示词见 `docs/brand.md`。
+- 项目采用 MIT，根目录 `LICENSE` 为许可全文，Cargo 元数据同步标注。每次打包须包含 `LICENSE`，避免只在仓库提供许可。

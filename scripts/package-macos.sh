@@ -16,6 +16,7 @@ STAGE="$(mktemp -d "$PROJECT_ROOT/target/dmg-stage.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
 ditto "$APP" "$STAGE/LeapDrop.app"
 cp docs/quick-start.txt "$STAGE/使用说明.txt"
+cp LICENSE "$STAGE/LICENSE"
 ln -s /Applications "$STAGE/Applications"
 hdiutil create -volname LeapDrop -srcfolder "$STAGE" -ov -format UDZO "$ARTIFACT_DIR/LeapDrop_${VERSION}_macOS_universal.dmg"
 hdiutil verify "$ARTIFACT_DIR/LeapDrop_${VERSION}_macOS_universal.dmg"

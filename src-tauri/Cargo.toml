@@ -1,8 +1,10 @@
 [package]
 name = "leapdrop"
-version = "0.3.0"
+version = "0.3.1"
 description = "跃传 LeapDrop - macOS / Windows 局域网文件互传"
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/peng411528/leapdrop"
 
 [lib]
 name = "leapdrop"

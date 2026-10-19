@@ -1,4 +1,4 @@
-跃传 LeapDrop 0.3.0
+跃传 LeapDrop 0.3.1
 简单好用的 Mac / Windows 局域网文件互传工具
 
 使用：
@@ -29,3 +29,5 @@ Windows：解压后双击 leapdrop.exe。需要 Microsoft WebView2 运行时。
 两台电脑请使用 v0.3.0 或更新的兼容版本。
 
 项目与下载：https://github.com/peng411528/leapdrop
+
+开源协议：MIT。许可全文见软件包中的 LICENSE 文件。
