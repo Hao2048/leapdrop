@@ -1,14 +1,13 @@
 // 接收端：HTTPS 服务（axum + rustls 自签证书）
-// 端点：GET /api/hello | POST /api/pair（配对确认，长轮询）| POST /api/prepare（配对+验签+长轮询确认）
+// 端点：POST /api/prepare（接收开关 + 长轮询确认）
 //       | PUT /api/chunk/{token}/{file}/{idx} | POST /api/finalize/{token}
 use crate::protocol::*;
 use crate::AppState;
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, State};
-use axum::http::{HeaderMap, StatusCode};
-use axum::routing::{get, post, put};
+use axum::http::StatusCode;
+use axum::routing::{post, put};
 use axum::{Json, Router};
-use base64::Engine as _;
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,17 +19,9 @@ pub struct Session {
     pub files: Vec<FileMeta>,
     pub tmp_dir: PathBuf,
     pub created: Instant,
-    pub decided: Option<bool>,          // 用户是否已决定
+    pub decided: Option<bool>, // 用户是否已决定
     pub notify: Arc<tokio::sync::Notify>,
     pub finalized: bool,
-}
-
-/// 一次配对请求会话
-pub struct PairSession {
-    pub req: PairReq,
-    pub created: Instant,
-    pub decided: Option<bool>,
-    pub notify: Arc<tokio::sync::Notify>,
 }
 
 pub struct ServerShared {
@@ -54,11 +45,9 @@ pub async fn start(app: Arc<AppState>) -> std::io::Result<u16> {
 
     let shared = Arc::new(ServerShared { app: app.clone() });
     let router = Router::new()
-        .route("/api/hello", get(hello))
-        .route("/api/pair", post(pair))
-        .route("/api/prepare", post(prepare))
-        .route("/api/chunk/{token}/{file}/{idx}", put(chunk))
-        .route("/api/finalize/{token}", post(finalize))
+        .route("/api/prepare", post(http_prepare))
+        .route("/api/chunk/{token}/{file}/{idx}", put(http_chunk))
+        .route("/api/finalize/{token}", post(http_finalize))
         .layer(DefaultBodyLimit::max((CHUNK_SIZE as usize) + 1024 * 1024))
         .with_state(shared);
 
@@ -73,186 +62,79 @@ pub async fn start(app: Arc<AppState>) -> std::io::Result<u16> {
     Ok(port)
 }
 
-async fn hello(State(s): State<Arc<ServerShared>>) -> Json<HelloResp> {
-    let id = s.app.identity.read().unwrap();
-    Json(HelloResp {
-        name: id.name.clone(),
-        fp: id.fingerprint.clone(),
-        id: id.device_id.clone(),
-        v: VERSION.to_string(),
-    })
+fn declined(message: &str) -> PrepareResp {
+    PrepareResp {
+        accepted: false,
+        token: String::new(),
+        message: message.into(),
+    }
 }
 
-/// 我方信息（用于配对响应 / 403 提示）
-fn my_info(app: &AppState) -> (String, String, String) {
-    let id = app.identity.read().unwrap();
-    (
-        id.device_id.clone(),
-        id.name.clone(),
-        base64::engine::general_purpose::STANDARD.encode(&id.device_pk),
-    )
-}
-
-/// 配对：验证签名（绑定 ID+公钥）→ 已配对直接成功；否则弹 UI 确认（长轮询 ≤60s）
-async fn pair(
-    State(s): State<Arc<ServerShared>>,
-    headers: HeaderMap,
-    body: String,
-) -> Result<Json<PairResp>, (StatusCode, Json<serde_json::Value>)> {
-    let req: PairReq = serde_json::from_str(&body)
-        .map_err(|_| (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "bad_body"}))))?;
-    let sig = headers
-        .get("x-leapdrop-sig")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| base64::engine::general_purpose::STANDARD.decode(v).ok())
-        .unwrap_or_default();
-    let pk = base64::engine::general_purpose::STANDARD
-        .decode(&req.pk)
-        .unwrap_or_default();
-    // 签名覆盖整个请求体原文，证明请求方持有该公钥对应的私钥
-    if pk.is_empty() || sig.is_empty() || !crate::identity::verify(&pk, body.as_bytes(), &sig) {
-        return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "bad_signature"}))));
+/// 发现设备后直接请求传输；接收开关开启时等待用户确认。
+pub async fn core_prepare(app: &Arc<AppState>, req: PrepareReq) -> Result<PrepareResp, String> {
+    if !app.settings.lock().unwrap().receive_enabled {
+        return Ok(declined("对方已关闭文件接收"));
     }
-    if crate::identity::device_id_of(&pk) != req.device_id {
-        return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "id_mismatch"}))));
-    }
-
-    // 已配对：幂等返回
-    if s.app.trusted.lock().unwrap().iter().any(|t| t.id == req.device_id && t.pk == req.pk) {
-        let (id, name, pk) = my_info(&s.app);
-        return Ok(Json(PairResp { accepted: true, status: "already".into(), device_id: id, name, pk }));
-    }
-
-    let token = crate::random_token();
-    let notify = Arc::new(tokio::sync::Notify::new());
+    if req.files.is_empty()
+        || req.files.iter().any(|f| {
+            f.name.is_empty()
+                || f.name == "."
+                || f.name == ".."
+                || f.name.contains(['/', '\\', ':', '\0'])
+                || f.chunk_size != CHUNK_SIZE
+                || f.chunks != chunk_count(f.size)
+        })
     {
-        let mut ps = s.app.pair_sessions.lock().unwrap();
-        ps.insert(
-            token.clone(),
-            PairSession { req: req.clone(), created: Instant::now(), decided: None, notify: notify.clone() },
-        );
+        return Err("文件信息无效".into());
     }
-
-    (s.app.emitter)(
-        "pair-incoming",
-        serde_json::json!({"token": token, "deviceId": req.device_id, "name": req.name}),
-    );
-
-    tokio::select! {
-        _ = notify.notified() => {}
-        _ = tokio::time::sleep(Duration::from_secs(60)) => {}
-    }
-    let accepted = s.app
-        .pair_sessions
-        .lock()
-        .unwrap()
-        .get(&token)
-        .and_then(|x| x.decided)
-        .unwrap_or(false);
-    s.app.pair_sessions.lock().unwrap().remove(&token);
-    if !accepted {
-        (s.app.emitter)("pair-closed", serde_json::json!({"token": token}));
-        return Ok(Json(PairResp { accepted: false, status: String::new(), device_id: String::new(), name: String::new(), pk: String::new() }));
-    }
-
-    // 记住对方
-    crate::add_trusted(&s.app, TrustedPeer {
-        id: req.device_id.clone(),
-        name: req.name.clone(),
-        pk: req.pk.clone(),
-        paired_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
-    });
-    let (id, name, pk) = my_info(&s.app);
-    Ok(Json(PairResp { accepted: true, status: "ok".into(), device_id: id, name, pk }))
-}
-
-/// UI 命令：用户对配对弹窗做出决定
-pub fn respond_pair(app: &AppState, token: &str, accept: bool) {
-    let mut ps = app.pair_sessions.lock().unwrap();
-    if let Some(session) = ps.get_mut(token) {
-        session.decided = Some(accept);
-        session.notify.notify_waiters();
-    }
-}
-
-/// 发起传输：配对门禁（ID 在信任列表 + 签名验证）→ 弹 UI 确认 → 长轮询 → 返回 token + 续传 bitmap
-async fn prepare(
-    State(s): State<Arc<ServerShared>>,
-    headers: HeaderMap,
-    body: String,
-) -> Result<Json<PrepareResp>, (StatusCode, Json<NeedPairing>)> {
-    let need_pairing = |app: &AppState| {
-        let (id, name, pk) = my_info(app);
-        (StatusCode::FORBIDDEN, Json(NeedPairing { error: "need_pairing".into(), device_id: id, name, pk }))
-    };
-
-    let sender_id = headers
-        .get("x-leapdrop-id")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_string();
-    let trusted = {
-        let list = s.app.trusted.lock().unwrap();
-        list.iter().find(|t| t.id == sender_id).cloned()
-    };
-    let Some(trusted) = trusted else {
-        return Err(need_pairing(&s.app));
-    };
-    // 验签：签名覆盖 prepare 请求体原文
-    let sig = headers
-        .get("x-leapdrop-sig")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| base64::engine::general_purpose::STANDARD.decode(v).ok())
-        .unwrap_or_default();
-    let pk = base64::engine::general_purpose::STANDARD.decode(&trusted.pk).unwrap_or_default();
-    if pk.is_empty() || !crate::identity::verify(&pk, body.as_bytes(), &sig) {
-        return Err(need_pairing(&s.app));
-    }
-
-    let req: PrepareReq = serde_json::from_str(&body)
-        .map_err(|_| (StatusCode::BAD_REQUEST, Json(NeedPairing { error: "bad_body".into(), device_id: String::new(), name: String::new(), pk: String::new() })))?;
-    let peer_name = trusted.name.clone();
+    let peer_name = req.sender_name.clone();
     let token = crate::random_token();
-    let tmp_dir = s.app.download_dir.join(".leapdrop-tmp").join(&token);
+    let tmp_dir = app.download_dir.join(".leapdrop-tmp").join(&token);
     tokio::fs::create_dir_all(&tmp_dir)
         .await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, Json(NeedPairing { error: "io".into(), device_id: String::new(), name: String::new(), pk: String::new() })))?;
+        .map_err(|_| "io error".to_string())?;
 
     let notify = Arc::new(tokio::sync::Notify::new());
     {
-        let mut sessions = s.app.sessions.lock().unwrap();
+        let settings = app.settings.lock().unwrap();
+        if !settings.receive_enabled {
+            drop(settings);
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            return Ok(declined("对方已关闭文件接收"));
+        }
+        let mut sessions = app.sessions.lock().unwrap();
         sessions.insert(
             token.clone(),
             Session {
                 peer_name: peer_name.clone(),
                 files: req.files.clone(),
-                tmp_dir,
+                tmp_dir: tmp_dir.clone(),
                 created: Instant::now(),
                 decided: None,
                 notify: notify.clone(),
                 finalized: false,
             },
         );
-    }
+        drop(sessions);
 
-    // 通知 UI 弹窗（接收确认）
-    (s.app.emitter)(
-        "incoming",
-        serde_json::json!({
-            "token": token,
-            "peer": peer_name,
-            "files": req.files.iter().map(|f| serde_json::json!({"name": f.name, "size": f.size})).collect::<Vec<_>>(),
-            "totalBytes": req.total_bytes,
-        }),
-    );
+        // 通知 UI 弹窗（接收确认）
+        (app.emitter)(
+            "incoming",
+            serde_json::json!({
+                "token": token,
+                "peer": peer_name,
+                "files": req.files.iter().map(|f| serde_json::json!({"name": f.name, "size": f.size})).collect::<Vec<_>>(),
+                "totalBytes": req.total_bytes,
+            }),
+        );
+    }
 
     // 长轮询用户决定（最多 90 秒）
     tokio::select! {
         _ = notify.notified() => {}
         _ = tokio::time::sleep(Duration::from_secs(90)) => {}
     }
-    let accepted = s
-        .app
+    let accepted = app
         .sessions
         .lock()
         .unwrap()
@@ -261,73 +143,75 @@ async fn prepare(
         .unwrap_or(false);
 
     if !accepted {
-        s.app.sessions.lock().unwrap().remove(&token);
-        (s.app.emitter)("incoming-closed", serde_json::json!({"token": token}));
-        return Ok(Json(PrepareResp {
+        app.sessions.lock().unwrap().remove(&token);
+        let _ = tokio::fs::remove_dir_all(&tmp_dir).await;
+        (app.emitter)("incoming-closed", serde_json::json!({"token": token}));
+        return Ok(PrepareResp {
             accepted: false,
             token: String::new(),
-            resume: Default::default(),
-            message: "对方拒绝了传输请求".into(),
-        }));
+            message: if app.settings.lock().unwrap().receive_enabled {
+                "对方拒绝了传输请求"
+            } else {
+                "对方已关闭文件接收"
+            }
+            .into(),
+        });
     }
 
-    // 计算续传：扫描 .part 文件与 bitmap 边车
-    let mut resume = ResumeMap::new();
-    if let Some(session) = s.app.sessions.lock().unwrap().get(&token) {
-        for (i, f) in session.files.iter().enumerate() {
-            let part = session.tmp_dir.join(format!("{i}.part"));
-            let sidecar = session.tmp_dir.join(format!("{i}.bitmap"));
-            if let Ok(bm) = std::fs::read(&sidecar) {
-                if let Ok(list) = serde_json::from_slice::<Vec<u64>>(&bm) {
-                    if !list.is_empty() {
-                        resume.insert(i, list);
-                        continue;
-                    }
-                }
-            }
-            if part.exists() {
-                // 无边车但有 part：按文件长度推断连续前缀
-                if let Ok(meta) = std::fs::metadata(&part) {
-                    let have = meta.len() / f.chunk_size;
-                    if have > 0 {
-                        resume.insert(i, (0..have).collect());
-                    }
-                }
-            }
+    for (i, f) in req.files.iter().enumerate() {
+        if f.size == 0 {
+            tokio::fs::File::create(tmp_dir.join(format!("{i}.part")))
+                .await
+                .map_err(|_| "io error".to_string())?;
         }
     }
 
-    Ok(Json(PrepareResp {
+    Ok(PrepareResp {
         accepted: true,
         token,
-        resume,
         message: String::new(),
-    }))
+    })
 }
 
 /// UI 命令：用户对 incoming 弹窗做出决定
 pub fn respond(app: &AppState, token: &str, accept: bool) {
+    let settings = app.settings.lock().unwrap();
     let mut sessions = app.sessions.lock().unwrap();
     if let Some(session) = sessions.get_mut(token) {
-        session.decided = Some(accept);
-        session.notify.notify_waiters();
+        if session.decided.is_some() {
+            return;
+        }
+        session.decided = Some(accept && settings.receive_enabled);
+        session.notify.notify_one();
     }
 }
 
-/// 接收一个分块：pwrite 到 .part 固定偏移，更新 bitmap 边车
-async fn chunk(
-    State(s): State<Arc<ServerShared>>,
-    Path((token, file_idx, chunk_idx)): Path<(String, usize, u64)>,
+/// 接收一个分块：写入 .part 的固定偏移
+pub async fn core_chunk(
+    app: &Arc<AppState>,
+    token: &str,
+    file_idx: usize,
+    chunk_idx: u64,
     body: Bytes,
-) -> StatusCode {
+) -> Result<(), u16> {
     let (tmp_dir, file_meta, total_chunks) = {
-        let sessions = s.app.sessions.lock().unwrap();
-        let Some(session) = sessions.get(&token) else {
-            return StatusCode::NOT_FOUND;
+        let sessions = app.sessions.lock().unwrap();
+        let Some(session) = sessions.get(token) else {
+            return Err(404);
         };
+        if session.decided != Some(true) || session.finalized {
+            return Err(403);
+        }
         let Some(f) = session.files.get(file_idx) else {
-            return StatusCode::NOT_FOUND;
+            return Err(404);
         };
+        if chunk_idx >= f.chunks {
+            return Err(400);
+        }
+        let expected = (f.size - chunk_idx * CHUNK_SIZE).min(CHUNK_SIZE);
+        if body.len() as u64 != expected {
+            return Err(400);
+        }
         (session.tmp_dir.clone(), f.name.clone(), f.chunks)
     };
 
@@ -343,33 +227,22 @@ async fn chunk(
         .await
     {
         Ok(f) => f,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+        Err(_) => return Err(500),
     };
     if fh.seek(std::io::SeekFrom::Start(offset)).await.is_err() {
-        return StatusCode::INTERNAL_SERVER_ERROR;
+        return Err(500);
     }
     if fh.write_all(&body).await.is_err() {
-        return StatusCode::INTERNAL_SERVER_ERROR;
+        return Err(500);
     }
     if fh.sync_data().await.is_err() {
-        return StatusCode::INTERNAL_SERVER_ERROR;
-    }
-
-    // bitmap 边车（读改写，量小无所谓）
-    let sidecar = tmp_dir.join(format!("{file_idx}.bitmap"));
-    let mut have: Vec<u64> = std::fs::read(&sidecar)
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default();
-    if !have.contains(&chunk_idx) {
-        have.push(chunk_idx);
-        let _ = std::fs::write(&sidecar, serde_json::to_vec(&have).unwrap());
+        return Err(500);
     }
 
     // 接收进度事件（节流在 UI 侧做）
     let bytes = body.len() as u64;
-    let done = have.len() as u64;
-    (s.app.emitter)(
+    let done = chunk_idx + 1;
+    (app.emitter)(
         "rx-progress",
         serde_json::json!({
             "token": token, "fileIdx": file_idx, "fileName": file_meta,
@@ -377,24 +250,28 @@ async fn chunk(
         }),
     );
 
-    StatusCode::NO_CONTENT
+    Ok(())
 }
 
 /// 全部传完：逐文件校验 sha256，落盘到下载目录
-async fn finalize(
-    State(s): State<Arc<ServerShared>>,
-    Path(token): Path<String>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+pub async fn core_finalize(app: &Arc<AppState>, token: &str) -> Result<serde_json::Value, u16> {
     let (files, tmp_dir, peer_name) = {
-        let mut sessions = s.app.sessions.lock().unwrap();
-        let Some(session) = sessions.get_mut(&token) else {
-            return Err(StatusCode::NOT_FOUND);
+        let mut sessions = app.sessions.lock().unwrap();
+        let Some(session) = sessions.get_mut(token) else {
+            return Err(404);
         };
+        if session.decided != Some(true) {
+            return Err(403);
+        }
         if session.finalized {
-            return Err(StatusCode::CONFLICT);
+            return Err(409);
         }
         session.finalized = true;
-        (session.files.clone(), session.tmp_dir.clone(), session.peer_name.clone())
+        (
+            session.files.clone(),
+            session.tmp_dir.clone(),
+            session.peer_name.clone(),
+        )
     };
 
     let mut saved = vec![];
@@ -417,7 +294,7 @@ async fn finalize(
             let n = match fh.read(&mut buf).await {
                 Ok(0) => break,
                 Ok(n) => n,
-                Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+                Err(_) => return Err(500),
             };
             hasher.update(&buf[..n]);
             size += n as u64;
@@ -427,32 +304,32 @@ async fn finalize(
             bad.push(i);
             continue;
         }
-        // 落盘（重名自动加序号）
-        let mut dest = s.app.download_dir.join(&f.name);
-        if dest.exists() {
-            if let Some(stem) = f.name.rsplit_once('.') {
-                let mut n = 1;
-                loop {
-                    dest = s.app.download_dir.join(format!("{} ({n}).{}", stem.0, stem.1));
-                    if !dest.exists() {
-                        break;
-                    }
-                    n += 1;
-                }
-            }
+        drop(fh);
+        // 重名自动加序号，兼容无扩展名文件。
+        let name = std::path::Path::new(&f.name);
+        let stem = name.file_stem().and_then(|v| v.to_str()).unwrap_or(&f.name);
+        let extension = name.extension().and_then(|v| v.to_str());
+        let mut dest = app.download_dir.join(&f.name);
+        let mut n = 1;
+        while dest.exists() {
+            let candidate = match extension {
+                Some(ext) => format!("{stem} ({n}).{ext}"),
+                None => format!("{stem} ({n})"),
+            };
+            dest = app.download_dir.join(candidate);
+            n += 1;
         }
         if tokio::fs::rename(&part, &dest).await.is_ok() {
-            let _ = tokio::fs::remove_file(tmp_dir.join(format!("{i}.bitmap"))).await;
             saved.push(dest.display().to_string());
         } else {
             bad.push(i);
         }
     }
     let _ = tokio::fs::remove_dir_all(&tmp_dir).await;
-    s.app.sessions.lock().unwrap().remove(&token);
+    app.sessions.lock().unwrap().remove(token);
 
     let ok = bad.is_empty();
-    (s.app.emitter)(
+    (app.emitter)(
         "rx-done",
         serde_json::json!({
             "token": token, "peer": peer_name, "ok": ok,
@@ -460,9 +337,9 @@ async fn finalize(
         }),
     );
     if ok {
-        Ok(Json(serde_json::json!({"ok": true, "saved": saved})))
+        Ok(serde_json::json!({"ok": true, "saved": saved}))
     } else {
-        Err(StatusCode::CONFLICT)
+        Err(409)
     }
 }
 
@@ -479,6 +356,36 @@ pub fn sweep_expired(app: &AppState) {
             let _ = std::fs::remove_dir_all(&s.tmp_dir);
         }
     }
-    let mut ps = app.pair_sessions.lock().unwrap();
-    ps.retain(|_, s| s.created.elapsed() < Duration::from_secs(10 * 60));
+}
+
+// HTTP 请求适配
+async fn http_prepare(
+    State(s): State<Arc<ServerShared>>,
+    Json(req): Json<PrepareReq>,
+) -> Result<Json<PrepareResp>, (StatusCode, String)> {
+    core_prepare(&s.app, req)
+        .await
+        .map(Json)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))
+}
+
+async fn http_chunk(
+    State(s): State<Arc<ServerShared>>,
+    Path((token, file_idx, chunk_idx)): Path<(String, usize, u64)>,
+    body: Bytes,
+) -> StatusCode {
+    match core_chunk(&s.app, &token, file_idx, chunk_idx, body).await {
+        Ok(()) => StatusCode::NO_CONTENT,
+        Err(c) => StatusCode::from_u16(c).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn http_finalize(
+    State(s): State<Arc<ServerShared>>,
+    Path(token): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    core_finalize(&s.app, &token)
+        .await
+        .map(Json)
+        .map_err(|c| StatusCode::from_u16(c).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR))
 }

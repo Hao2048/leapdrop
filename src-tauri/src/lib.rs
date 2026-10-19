@@ -1,11 +1,10 @@
-// 跃传 LeapDrop：跨平台局域网文件互传（P0：mDNS 发现 + TLS 直传）
-#[cfg(target_os = "android")]
-pub mod android;
+// 跃传 LeapDrop：macOS / Windows 局域网设备发现与文件互传
 pub mod discovery;
 pub mod identity;
 pub mod protocol;
 pub mod sender;
 pub mod server;
+pub mod settings;
 
 use serde::Serialize;
 use std::collections::HashMap;
@@ -23,47 +22,9 @@ pub struct AppState {
     pub data_dir: PathBuf,
     pub peers: Arc<Mutex<HashMap<String, discovery::Peer>>>,
     pub sessions: Mutex<HashMap<String, server::Session>>,
-    pub pair_sessions: Mutex<HashMap<String, server::PairSession>>,
-    pub trusted: Arc<Mutex<Vec<protocol::TrustedPeer>>>,
+    pub settings: Mutex<settings::Settings>,
     pub emitter: Emitter,
     pub discovery: OnceLock<Arc<discovery::Discovery>>,
-}
-
-/// 读取 trusted.json
-pub fn load_trusted(data_dir: &std::path::Path) -> Vec<protocol::TrustedPeer> {
-    std::fs::read_to_string(data_dir.join("trusted.json"))
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_default()
-}
-
-pub fn save_trusted(state: &AppState) {
-    if let Ok(list) = state.trusted.lock() {
-        let _ = std::fs::write(
-            state.data_dir.join("trusted.json"),
-            serde_json::to_vec_pretty(&*list).unwrap_or_default(),
-        );
-    }
-}
-
-/// 新增/更新一台已配对设备，并同步 UI
-pub fn add_trusted(state: &AppState, peer: protocol::TrustedPeer) {
-    {
-        let mut list = state.trusted.lock().unwrap();
-        list.retain(|t| t.id != peer.id);
-        list.push(peer);
-    }
-    save_trusted(state);
-    discovery::emit_peers(&state.peers, &state.trusted, &state.emitter);
-    (state.emitter)("trusted-changed", trusted_json(state));
-}
-
-pub fn trusted_json(state: &AppState) -> serde_json::Value {
-    state
-        .trusted
-        .lock()
-        .map(|l| serde_json::to_value(&*l).unwrap_or_default())
-        .unwrap_or_default()
 }
 
 pub fn random_token() -> String {
@@ -81,7 +42,7 @@ pub struct StateResp {
     pub device_id: String,
     pub port: u16,
     pub download_dir: String,
-    pub trusted: Vec<protocol::TrustedPeer>,
+    pub receive_enabled: bool,
 }
 
 #[tauri::command]
@@ -94,7 +55,7 @@ fn get_state(state: State<'_, Arc<AppState>>) -> StateResp {
         device_id: id.device_id.clone(),
         port: state.port,
         download_dir: state.download_dir.display().to_string(),
-        trusted: state.trusted.lock().map(|l| l.clone()).unwrap_or_default(),
+        receive_enabled: state.settings.lock().unwrap().receive_enabled,
     }
 }
 
@@ -151,19 +112,10 @@ fn respond_incoming(state: State<'_, Arc<AppState>>, token: String, accept: bool
     server::respond(&state, &token, accept);
 }
 
-/// 用户对配对请求的决定
+/// 持久化本机是否允许接收文件。
 #[tauri::command]
-fn respond_pair(state: State<'_, Arc<AppState>>, token: String, accept: bool) {
-    server::respond_pair(&state, &token, accept);
-}
-
-/// 移除一台已配对设备（解除配对）
-#[tauri::command]
-fn remove_trusted(state: State<'_, Arc<AppState>>, device_id: String) {
-    state.trusted.lock().unwrap().retain(|t| t.id != device_id);
-    save_trusted(&state);
-    discovery::emit_peers(&state.peers, &state.trusted, &state.emitter);
-    (state.emitter)("trusted-changed", trusted_json(&state));
+fn set_receive_enabled(state: State<'_, Arc<AppState>>, enabled: bool) -> Result<(), String> {
+    settings::set_receive_enabled(&state, enabled)
 }
 
 /// 修改设备名：落盘 + 更新内存 + 重新注册 mDNS TXT
@@ -211,7 +163,6 @@ impl discovery::Discovery {
     }
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // rustls 全局 crypto provider（reqwest/rustls/axum-server 共用 ring）
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -225,22 +176,17 @@ pub fn run() {
 
             let id = identity::load_or_create(&data_dir)?;
             let port = identity::pick_port(52920)?;
-            // Android 无「下载」目录概念，落到应用私有目录（可在系统文件里访问）
-            let download_dir = if cfg!(target_os = "android") {
-                data_dir.join("downloads")
-            } else {
-                dirs::download_dir()
-                    .or_else(dirs::home_dir)
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join("LeapDrop")
-            };
+            let download_dir = dirs::download_dir()
+                .or_else(dirs::home_dir)
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("LeapDrop");
             std::fs::create_dir_all(&download_dir)?;
 
             let emitter: Emitter = Arc::new(move |name, payload| {
                 let _ = handle.emit(name, payload);
             });
 
-            let trusted = Arc::new(Mutex::new(load_trusted(&data_dir)));
+            let settings = settings::load(&data_dir)?;
             let state = Arc::new(AppState {
                 identity: RwLock::new(id),
                 port,
@@ -248,8 +194,7 @@ pub fn run() {
                 data_dir,
                 peers: Arc::new(Mutex::new(HashMap::new())),
                 sessions: Mutex::new(HashMap::new()),
-                pair_sessions: Mutex::new(HashMap::new()),
-                trusted: trusted.clone(),
+                settings: Mutex::new(settings),
                 emitter: emitter.clone(),
                 discovery: OnceLock::new(),
             });
@@ -258,19 +203,10 @@ pub fn run() {
             let actual = tauri::async_runtime::block_on(server::start(state.clone()))?;
             debug_assert_eq!(actual, port);
 
-            // Android：Wi-Fi 组播默认被省电策略过滤，需持锁接收 mDNS
-            #[cfg(target_os = "android")]
-            crate::android::acquire_multicast_lock();
-
             // mDNS 发现（注意：需要 identity 的快照，rename 后 TXT 单独重注册）
             let id_snapshot = state.identity.read().unwrap().clone();
-            let disc = discovery::start(
-                &id_snapshot,
-                actual,
-                state.peers.clone(),
-                trusted.clone(),
-                emitter.clone(),
-            )?;
+            let disc =
+                discovery::start(&id_snapshot, actual, state.peers.clone(), emitter.clone())?;
             let _ = state.discovery.set(Arc::new(disc));
 
             // 会话过期清理
@@ -290,8 +226,7 @@ pub fn run() {
             pick_files,
             send_files,
             respond_incoming,
-            respond_pair,
-            remove_trusted,
+            set_receive_enabled,
             set_device_name
         ])
         .run(tauri::generate_context!())

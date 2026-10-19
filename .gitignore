@@ -1,18 +1,24 @@
-# Rust
-src-tauri/target/
+# 编译与生成文件，统一在根目录 target/；兼容工具生成的嵌套目录
+/target/
+/src-tauri/target/
+/src-tauri/gen/
 
-# 本机专用的工具链配置（SDK 回落），不入库以免影响 CI
-src-tauri/.cargo/config.toml
+# 本机工具链配置
+/.cargo/config.toml
+/src-tauri/.cargo/
 
-# 打包产物
+# 安装包与导出产物
+/dist/
 *.dmg
 *.msi
 *.exe
-src-tauri/gen/
+*.apk
+*.ipa
+*.app/
+*.zip
 
-# 系统杂项
+# 系统与编辑器临时文件
 .DS_Store
-src-tauri/icons/icon.iconset/
-
-# CI workflow：当前 token 缺 workflow scope 暂不入库（内容见 docs/release-workflow.example.yml）
-.github/workflows/
+*.log
+*.swp
+/src-tauri/icons/icon.iconset/

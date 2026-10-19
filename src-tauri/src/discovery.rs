@@ -11,7 +11,7 @@ pub const SERVICE_TYPE: &str = "_leapdrop._tcp.local.";
 
 #[derive(Serialize, Clone, Debug)]
 pub struct Peer {
-    pub id: String, // service instance fullname
+    pub id: String,        // service instance fullname
     pub device_id: String, // 对外设备 ID（来自 mDNS TXT）
     pub name: String,
     pub os: String,
@@ -39,12 +39,10 @@ pub fn start(
     identity: &Identity,
     port: u16,
     peers: Arc<Mutex<HashMap<String, Peer>>>,
-    trusted: Arc<Mutex<Vec<crate::protocol::TrustedPeer>>>,
     emitter: crate::Emitter,
 ) -> std::io::Result<Discovery> {
-    let daemon = ServiceDaemon::new().map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::Other, format!("mDNS daemon: {e}"))
-    })?;
+    let daemon = ServiceDaemon::new()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("mDNS daemon: {e}")))?;
 
     let instance = format!("leapdrop-{}", &identity.fingerprint[..12]);
     let host = format!("{instance}.local.");
@@ -61,11 +59,18 @@ pub fn start(
         .collect::<Vec<_>>()
         .join(",");
 
-    let info = ServiceInfo::new(SERVICE_TYPE, &instance, &host, ips_csv.as_str(), port, Some(props))
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("mDNS info: {e}")))?;
-    daemon
-        .register(info)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("mDNS register: {e}")))?;
+    let info = ServiceInfo::new(
+        SERVICE_TYPE,
+        &instance,
+        &host,
+        ips_csv.as_str(),
+        port,
+        Some(props),
+    )
+    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("mDNS info: {e}")))?;
+    daemon.register(info).map_err(|e| {
+        std::io::Error::new(std::io::ErrorKind::Other, format!("mDNS register: {e}"))
+    })?;
 
     let receiver = daemon
         .browse(SERVICE_TYPE)
@@ -73,7 +78,6 @@ pub fn start(
 
     let my_fp = identity.fingerprint.clone();
     let my_fullname = format!("{instance}.{SERVICE_TYPE}");
-    let trusted = trusted;
 
     // 监听循环：解析/移除对端服务，推送 UI（阻塞式 recv，独立线程）
     std::thread::spawn(move || loop {
@@ -114,13 +118,20 @@ pub fn start(
                         .unwrap_or_else(now),
                     last_seen: now(),
                 };
-                peers.lock().ok().map(|mut m| m.insert(peer.id.clone(), peer));
-                emit_peers(&peers, &trusted, &emitter);
+                peers
+                    .lock()
+                    .ok()
+                    .map(|mut m| m.insert(peer.id.clone(), peer));
+                emit_peers(&peers, &emitter);
             }
             Ok(ServiceEvent::ServiceRemoved(_, fullname)) => {
-                let removed = peers.lock().ok().and_then(|mut m| m.remove(&fullname)).is_some();
+                let removed = peers
+                    .lock()
+                    .ok()
+                    .and_then(|mut m| m.remove(&fullname))
+                    .is_some();
                 if removed {
-                    emit_peers(&peers, &trusted, &emitter);
+                    emit_peers(&peers, &emitter);
                 }
             }
             Ok(_) => {}
@@ -144,23 +155,11 @@ fn pick_addr(addrs: &std::collections::HashSet<IpAddr>) -> String {
         .unwrap_or_else(|| "127.0.0.1".into())
 }
 
-pub fn emit_peers(
-    peers: &Arc<Mutex<HashMap<String, Peer>>>,
-    trusted: &Arc<Mutex<Vec<crate::protocol::TrustedPeer>>>,
-    emitter: &crate::Emitter,
-) {
+pub fn emit_peers(peers: &Arc<Mutex<HashMap<String, Peer>>>, emitter: &crate::Emitter) {
     if let Ok(m) = peers.lock() {
-        let trusted_ids: Vec<String> = trusted
-            .lock()
-            .map(|t| t.iter().map(|x| x.id.clone()).collect())
-            .unwrap_or_default();
         let mut list: Vec<serde_json::Value> = m
             .values()
-            .map(|p| {
-                let mut v = serde_json::to_value(p).unwrap_or_default();
-                v["paired"] = serde_json::Value::Bool(trusted_ids.contains(&p.device_id));
-                v
-            })
+            .map(|p| serde_json::to_value(p).unwrap_or_default())
             .collect();
         list.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
         emitter("peers", serde_json::Value::Array(list));
